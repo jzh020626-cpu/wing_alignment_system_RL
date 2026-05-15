@@ -1,0 +1,784 @@
+tracer1:
+  goto_pose_node:
+    ros__parameters:
+      robot_name: "tracer1"
+      mocap_topic: "/Rigid17/pose"
+      cmd_topic: "cmd_vel_desired"
+
+      swap_xz: false
+      negate_x: false
+      negate_z: true
+      flip_heading_sign: false
+      heading_deg_bias: 0.0
+
+      # ===== 默认 / 最终粗定位模式 =====
+      v_nominal: 0.20
+      v_max: 0.25
+      w_max: 0.65
+
+      pos_tol: 0.05
+      yaw_tol_deg: 3.0
+      k_yaw: 1.5
+
+      slow_radius: 0.30
+      v_slow_max: 0.08
+      w_slow_max: 0.30
+
+      v_min_far: 0.04
+      near_rotate_only_deg: 12.0
+      rotate_only_deg: 20.0
+
+      align_yaw_at_goal: true
+      treat_zero_yaw_as_keep: false
+
+      goal_reached_latch_sec: 1.0
+      stop_hold_sec: 1.0
+      pose_timeout_sec: 0.25
+      final_stop_hold_sec: 0.35
+
+      dv_max: 0.20
+      dw_max: 0.80
+
+      # ===== precision mode 真正进入底盘控制 =====
+      precision_v_max: 0.06
+      precision_w_max: 0.25
+      precision_k_x: 1.20
+      precision_k_y: 2.20
+      precision_k_yaw: 1.00
+      precision_k_heading: 1.10
+      precision_rotate_only_deg: 9.0
+      precision_deadband_x: 0.006
+      precision_deadband_y: 0.004
+      precision_deadband_yaw_deg: 2.0
+      precision_pos_tol: 0.025
+      precision_yaw_tol_deg: 2.0
+      precision_final_stop_radius: 0.020
+      precision_final_stop_yaw_tol_deg: 2.5
+
+      # ===== staging 快速模式 =====
+      staging_profile_code: 1.0
+      staging_v_nominal: 0.25
+      staging_v_max: 0.25
+      staging_w_max: 0.65
+
+      staging_pos_tol: 0.06
+      staging_yaw_tol_deg: 8.0
+
+      staging_slow_radius: 0.18
+      staging_v_slow_max: 0.12
+      staging_w_slow_max: 0.35
+
+      staging_v_min_far: 0.06
+      staging_near_rotate_only_deg: 8.0
+      staging_rotate_only_deg: 15.0
+
+      staging_align_yaw_at_goal: false
+
+      # ===== transport 带载低速模式 =====
+      transport_profile_code: 2.0
+      transport_v_nominal: 0.10
+      transport_v_max: 0.12
+      transport_w_max: 0.25
+
+      transport_pos_tol: 0.06
+      transport_yaw_tol_deg: 4.0
+
+      transport_slow_radius: 0.40
+      transport_v_slow_max: 0.05
+      transport_w_slow_max: 0.18
+
+      transport_v_min_far: 0.03
+      transport_near_rotate_only_deg: 10.0
+      transport_rotate_only_deg: 16.0
+
+      transport_align_yaw_at_goal: true
+
+  cmd_watchdog:
+    ros__parameters:
+      robot_name: "tracer1"
+      watchdog_hz: 40.0
+      age_safe_ms: 150.0
+      age_stop_ms: 400.0
+      decay_mode: "linear"
+      decay_k: 3.0
+      pair_window_ms: 60.0
+      emergency_stop_topic: "/wing_alignment/emergency_stop"
+      log_dir: "~/.ros/cmd_safety_logs"
+      run_id: ""
+      allow_unsafe_baseline: false
+      baseline_mode: "current_safe_default"
+      scheduler_mode: "current_hybrid"
+      watchdog_mode: "decay_then_stop"
+      baseline_execution_environment: "hardware"
+      link_profile: "unspecified"
+      profile_source: "assumed"
+      communication_profile:
+        mode: "wifi_nominal"
+        profile_source: "configured"
+        delay_ms_mean: 0.0
+        jitter_ms: 0.0
+        loss_rate: 0.0
+        burst_loss_rate: 0.0
+        executor_delay_ms: 0.0
+        notes: "Configured profile for logging and offline/replay experiments; not a claim of measured 5G/Wi-Fi performance."
+
+  qr_delta_publisher:
+    ros__parameters:
+      topic_pose_in: "object_position"
+      topic_delta_out: "wing_alignment/delta"
+      out_frame_id: "car_frame"
+      deadband_m: 0.001
+      max_pub_hz: 30.0
+      publish_enabled_on_start: true
+      publish_mode: "absolute"
+      output_stamp_source: "now"
+      fallback_to_local_stamp_on_clock_offset: true
+      enforce_pose_max_age: false
+      pose_max_age_sec: 2.0
+      future_stamp_tolerance_sec: 1.0
+      clock_offset_warn_sec: 60.0
+      max_backward_jump_sec: 0.5
+      zero_frames: 8
+      zero_std_max_m: 0.010
+      zero_max_wait_sec: 4.0
+      max_jump_m: 0.80
+      acquire_frames: 5
+      acquire_std_max_m: 0.030
+      reacquire_consistent_frames: 5
+      duplicate_position_eps: 1.0e-5
+
+tracer2:
+  goto_pose_node:
+    ros__parameters:
+      robot_name: "tracer2"
+      mocap_topic: "/Rigid14/pose"
+      cmd_topic: "cmd_vel_desired"
+
+      swap_xz: false
+      negate_x: false
+      negate_z: true
+      flip_heading_sign: false
+      heading_deg_bias: 0.0
+
+      # ===== 默认 / 最终粗定位模式 =====
+      v_nominal: 0.20
+      v_max: 0.25
+      w_max: 0.65
+
+      pos_tol: 0.05
+      yaw_tol_deg: 3.0
+      k_yaw: 1.5
+
+      slow_radius: 0.30
+      v_slow_max: 0.08
+      w_slow_max: 0.30
+
+      v_min_far: 0.04
+      near_rotate_only_deg: 12.0
+      rotate_only_deg: 20.0
+
+      align_yaw_at_goal: true
+      treat_zero_yaw_as_keep: false
+
+      goal_reached_latch_sec: 1.0
+      stop_hold_sec: 1.0
+      pose_timeout_sec: 0.25
+      final_stop_hold_sec: 0.35
+
+      dv_max: 0.20
+      dw_max: 0.80
+
+      # ===== precision mode 真正进入底盘控制 =====
+      precision_v_max: 0.06
+      precision_w_max: 0.25
+      precision_k_x: 1.20
+      precision_k_y: 2.20
+      precision_k_yaw: 1.00
+      precision_k_heading: 1.10
+      precision_rotate_only_deg: 9.0
+      precision_deadband_x: 0.006
+      precision_deadband_y: 0.004
+      precision_deadband_yaw_deg: 2.0
+      precision_pos_tol: 0.025
+      precision_yaw_tol_deg: 2.0
+      precision_final_stop_radius: 0.020
+      precision_final_stop_yaw_tol_deg: 2.5
+
+      # ===== staging 快速模式 =====
+      staging_profile_code: 1.0
+      staging_v_nominal: 0.25
+      staging_v_max: 0.25
+      staging_w_max: 0.65
+
+      staging_pos_tol: 0.06
+      staging_yaw_tol_deg: 8.0
+
+      staging_slow_radius: 0.18
+      staging_v_slow_max: 0.12
+      staging_w_slow_max: 0.35
+
+      staging_v_min_far: 0.06
+      staging_near_rotate_only_deg: 8.0
+      staging_rotate_only_deg: 15.0
+
+      staging_align_yaw_at_goal: false
+
+      # ===== transport 带载低速模式 =====
+      transport_profile_code: 2.0
+      transport_v_nominal: 0.10
+      transport_v_max: 0.12
+      transport_w_max: 0.25
+
+      transport_pos_tol: 0.06
+      transport_yaw_tol_deg: 4.0
+
+      transport_slow_radius: 0.40
+      transport_v_slow_max: 0.05
+      transport_w_slow_max: 0.18
+
+      transport_v_min_far: 0.03
+      transport_near_rotate_only_deg: 10.0
+      transport_rotate_only_deg: 16.0
+
+      transport_align_yaw_at_goal: true
+
+  cmd_watchdog:
+    ros__parameters:
+      robot_name: "tracer2"
+      watchdog_hz: 40.0
+      age_safe_ms: 150.0
+      age_stop_ms: 400.0
+      decay_mode: "linear"
+      decay_k: 3.0
+      pair_window_ms: 60.0
+      emergency_stop_topic: "/wing_alignment/emergency_stop"
+      log_dir: "~/.ros/cmd_safety_logs"
+      run_id: ""
+      allow_unsafe_baseline: false
+      baseline_mode: "current_safe_default"
+      scheduler_mode: "current_hybrid"
+      watchdog_mode: "decay_then_stop"
+      baseline_execution_environment: "hardware"
+      link_profile: "unspecified"
+      profile_source: "assumed"
+      communication_profile:
+        mode: "wifi_nominal"
+        profile_source: "configured"
+        delay_ms_mean: 0.0
+        jitter_ms: 0.0
+        loss_rate: 0.0
+        burst_loss_rate: 0.0
+        executor_delay_ms: 0.0
+        notes: "Configured profile for logging and offline/replay experiments; not a claim of measured 5G/Wi-Fi performance."
+
+  qr_delta_publisher:
+    ros__parameters:
+      topic_pose_in: "object_position"
+      topic_delta_out: "wing_alignment/delta"
+      out_frame_id: "car_frame"
+      deadband_m: 0.001
+      max_pub_hz: 30.0
+      publish_enabled_on_start: true
+      publish_mode: "absolute"
+      output_stamp_source: "now"
+      fallback_to_local_stamp_on_clock_offset: true
+      enforce_pose_max_age: false
+      pose_max_age_sec: 2.0
+      future_stamp_tolerance_sec: 1.0
+      clock_offset_warn_sec: 60.0
+      max_backward_jump_sec: 0.5
+      zero_frames: 8
+      zero_std_max_m: 0.010
+      zero_max_wait_sec: 4.0
+      max_jump_m: 0.80
+      acquire_frames: 5
+      acquire_std_max_m: 0.030
+      reacquire_consistent_frames: 5
+      duplicate_position_eps: 1.0e-5
+
+tracer3:
+  goto_pose_node:
+    ros__parameters:
+      robot_name: "tracer3"
+      mocap_topic: "/Rigid15/pose"
+      cmd_topic: "cmd_vel_desired"
+
+      swap_xz: false
+      negate_x: false
+      negate_z: true
+      flip_heading_sign: false
+      heading_deg_bias: 0.0
+
+      # ===== 默认 / 最终粗定位模式 =====
+      v_nominal: 0.20
+      v_max: 0.25
+      w_max: 0.65
+
+      pos_tol: 0.05
+      yaw_tol_deg: 3.0
+      k_yaw: 1.5
+
+      slow_radius: 0.30
+      v_slow_max: 0.08
+      w_slow_max: 0.30
+
+      v_min_far: 0.04
+      near_rotate_only_deg: 12.0
+      rotate_only_deg: 20.0
+
+      align_yaw_at_goal: true
+      treat_zero_yaw_as_keep: false
+
+      goal_reached_latch_sec: 1.0
+      stop_hold_sec: 1.0
+      pose_timeout_sec: 0.25
+      final_stop_hold_sec: 0.35
+
+      dv_max: 0.20
+      dw_max: 0.80
+
+      # ===== precision mode 真正进入底盘控制 =====
+      precision_v_max: 0.06
+      precision_w_max: 0.25
+      precision_k_x: 1.20
+      precision_k_y: 2.20
+      precision_k_yaw: 1.00
+      precision_k_heading: 1.10
+      precision_rotate_only_deg: 9.0
+      precision_deadband_x: 0.006
+      precision_deadband_y: 0.004
+      precision_deadband_yaw_deg: 2.0
+      precision_pos_tol: 0.025
+      precision_yaw_tol_deg: 2.0
+      precision_final_stop_radius: 0.020
+      precision_final_stop_yaw_tol_deg: 2.5
+
+      # ===== staging 快速模式 =====
+      staging_profile_code: 1.0
+      staging_v_nominal: 0.25
+      staging_v_max: 0.25
+      staging_w_max: 0.65
+
+      staging_pos_tol: 0.06
+      staging_yaw_tol_deg: 8.0
+
+      staging_slow_radius: 0.18
+      staging_v_slow_max: 0.12
+      staging_w_slow_max: 0.35
+
+      staging_v_min_far: 0.06
+      staging_near_rotate_only_deg: 8.0
+      staging_rotate_only_deg: 15.0
+
+      staging_align_yaw_at_goal: false
+
+      # ===== transport 带载低速模式 =====
+      transport_profile_code: 2.0
+      transport_v_nominal: 0.10
+      transport_v_max: 0.12
+      transport_w_max: 0.25
+
+      transport_pos_tol: 0.06
+      transport_yaw_tol_deg: 4.0
+
+      transport_slow_radius: 0.40
+      transport_v_slow_max: 0.05
+      transport_w_slow_max: 0.18
+
+      transport_v_min_far: 0.03
+      transport_near_rotate_only_deg: 10.0
+      transport_rotate_only_deg: 16.0
+
+      transport_align_yaw_at_goal: true
+
+  cmd_watchdog:
+    ros__parameters:
+      robot_name: "tracer3"
+      watchdog_hz: 40.0
+      age_safe_ms: 150.0
+      age_stop_ms: 400.0
+      decay_mode: "linear"
+      decay_k: 3.0
+      pair_window_ms: 60.0
+      emergency_stop_topic: "/wing_alignment/emergency_stop"
+      log_dir: "~/.ros/cmd_safety_logs"
+      run_id: ""
+      allow_unsafe_baseline: false
+      baseline_mode: "current_safe_default"
+      scheduler_mode: "current_hybrid"
+      watchdog_mode: "decay_then_stop"
+      baseline_execution_environment: "hardware"
+      link_profile: "unspecified"
+      profile_source: "assumed"
+      communication_profile:
+        mode: "wifi_nominal"
+        profile_source: "configured"
+        delay_ms_mean: 0.0
+        jitter_ms: 0.0
+        loss_rate: 0.0
+        burst_loss_rate: 0.0
+        executor_delay_ms: 0.0
+        notes: "Configured profile for logging and offline/replay experiments; not a claim of measured 5G/Wi-Fi performance."
+
+  qr_delta_publisher:
+    ros__parameters:
+      topic_pose_in: "object_position"
+      topic_delta_out: "wing_alignment/delta"
+      out_frame_id: "car_frame"
+      deadband_m: 0.001
+      max_pub_hz: 30.0
+      publish_enabled_on_start: true
+      publish_mode: "absolute"
+      output_stamp_source: "now"
+      fallback_to_local_stamp_on_clock_offset: true
+      enforce_pose_max_age: false
+      pose_max_age_sec: 2.0
+      future_stamp_tolerance_sec: 1.0
+      clock_offset_warn_sec: 60.0
+      max_backward_jump_sec: 0.5
+      zero_frames: 8
+      zero_std_max_m: 0.010
+      zero_max_wait_sec: 4.0
+      max_jump_m: 0.80
+      acquire_frames: 5
+      acquire_std_max_m: 0.030
+      reacquire_consistent_frames: 5
+      duplicate_position_eps: 1.0e-5
+
+mission_coordinator:
+  ros__parameters:
+    # ===== mocap / world =====
+    wing_mocap_topic: "/Rigid8/pose"
+    mm_to_m: 0.001
+    swap_xz: false
+    negate_x: false
+    negate_z: true
+    freeze_wing_on_start: true
+    use_goal_yaw: true
+    mocap_timeout_sec: 0.50
+
+    # ===== robots =====
+    robots: ["tracer1", "tracer2", "tracer3"]
+    dispatch_order: ["tracer1", "tracer2", "tracer3"]
+    robot_mocap_topics: ["/Rigid17/pose", "/Rigid14/pose", "/Rigid15/pose"]
+    # 按 tracer1~3 顺序配置；transport 底盘前馈优先使用 ekf 的 filtered odom
+    robot_odom_topics: ["/tracer1/odometry/filtered", "/tracer2/odometry/filtered", "/tracer3/odometry/filtered"]
+    robot_imu_topics: ["/tracer1/IMU_data", "/tracer2/IMU_data", "/tracer3/IMU_data"]
+
+    # ===== tool offsets relative to wing =====
+    tool_offsets_flat: [0.6070, -0.4753, 5.0, 0.4388, 0.2423, 6.0, -0.8521, 0.1302, 0.8]
+
+    # ===== staging / entry =====
+    staging_enable: true
+    staging_offsets_flat: [-1.80, 1.80, -1.80, -1.80, -2.80, 0.00]
+    entry_enable: true
+    entry_zone_r: 2.2
+
+    # ===== path / timing =====
+    path_mode: "x_first"
+    final_path_mode: "x_first"
+    path_min_seg_m: 0.03
+    reach_min_delay_sec: 0.25
+    waypoint_dwell_sec: 2.0
+    dwell_lock_stop: true
+
+    micro_mode: "cross"
+    micro_radii_m: [0.0, 0.08, 0.15]
+    micro_max_attempts: 4
+    micro_min_move_m: 0.07
+
+    base_micro_search_enable: false
+    wait_qr_fail_timeout_sec: 30.0
+
+    start_mode: "parallel"
+    cooperative_common_x_backoff_m: 0.0
+    cooperative_anchor_robot: "tracer1"
+    cooperative_start_line_y: [-3.320, -2.320, -1.320]
+    cooperative_wait_tracer1_offset_y_m: 1.5
+    cooperative_wait_side_mode: "follow_tracer1"
+
+    # ===== topics =====
+    delta_topic_template: "/{robot}/wing_alignment/delta"
+    raw_qr_topic_template: "/{robot}/object_position"
+    precision_topic_template: "/{robot}/precision_mode"
+    emergency_stop_topic: "/wing_alignment/emergency_stop"
+    force_contact_enable: true
+    force_contact_topic_template: "/{slide}/force_contact"
+    # 打开相机参与：恢复 WAIT_QR / fine alignment，并在 transport 中继续叠加视觉 delta
+    alignment_vision_enable: true
+
+    # ===== delta / estimator =====
+    delta_arm_delay_sec: 0.30
+    delta_max_age_sec: 2.0
+    delta_frame_gap_max_sec: 2.5
+    delta_stable_eps: 0.005
+    delta_threshold_frames: 2
+    delta_abs_max_m: 2.0
+
+    te_min_confidence: 0.55
+    te_ema_alpha: 0.45
+    te_lost_timeout_sec: 2.5
+    te_freeze_timeout_sec: 4.0
+    te_jump_sigma: 0.02
+    te_duplicate_eps: 1.0e-6
+    te_max_jump_suppress: 0.800
+    te_jump_decay_alpha: 0.3
+
+    # ===== absolute delta 模式下不做 zero，直接 arm 即可 =====
+    qr_zero_enable: false
+    qr_zero_wait_max_sec: 4.0
+    qr_zero_retry_sec: 0.5
+
+    # ===== raw QR stability =====
+    raw_qr_seen_timeout_sec: 0.6
+    raw_qr_arm_delay_sec: 0.8
+    raw_qr_accept_radius_m: 0.30
+    raw_qr_min_hits: 2
+    raw_qr_hit_timeout_sec: 2.5
+    vision_stamp_offset_fallback_sec: 60.0
+
+    raw_qr_min_x_m: -0.15
+    raw_qr_max_x_m: 0.15
+    raw_qr_max_abs_y_m: 0.12
+    raw_qr_min_z_m: 0.03
+    raw_qr_max_z_m: 0.50
+
+    wait_qr_hold_on_raw_qr_sec: 10.0
+
+    # ===== alignment tolerance =====
+    fine_enable: true
+    fine_xy_tol_m: 0.005
+    fine_z_tol_m: 0.005
+    fine_xy_stable_frames: 5
+
+    # ===== approach slow =====
+    approach_slow_enable: false
+    approach_slow_r: 1.5
+    approach_slow_hyst: 0.3
+
+    # ===== collision gate =====
+    gate_enable: true
+    gate_near_wing_r: 2.0
+    gate_dmin_far: 0.85
+    gate_dresume_far: 1.10
+    gate_dmin_near: 0.65
+    gate_dresume_near: 0.80
+    gate_hold_sec: 0.50
+    gate_keep_one_moving: true
+
+    # ===== global mission =====
+    all_ready_hold_sec: 0.80
+    sync_lift_settle_sec: 0.60 
+    transport_enable: true
+    # 世界坐标系目标偏移: [dx_m, dy_m, dyaw_deg]
+    transport_goal_offset_xyyaw: [0.60, 0.0, 0.0]
+    transport_profile_code: 2.0
+    transport_goal_refresh_sec: 0.50
+    transport_settle_sec: 1.00
+    transport_finish_pos_tol_m: 0.08
+    transport_finish_yaw_tol_deg: 6.0
+    transport_max_center_error_m: 0.20
+    transport_abort_on_wing_pose_lost: true
+
+    # ===== P0: 带载 level / stable =====
+    load_level_enable: true
+    load_level_only_raise_z: true
+    load_level_time_sec: 2.5
+    load_level_z_tol_mm: 1.0
+    load_level_vel_tol_mmps: 1.0
+
+    # 接触判定阈值（只对"已接触/已受力"的滑台取 z_plane）
+    load_level_contact_force_n: 18.0
+    load_level_force_fresh_timeout_sec: 0.40
+    load_level_z_plane_max_mm: 180.0
+    load_level_z_plane_min_mm: 80.0
+
+    load_stable_hold_sec: 1.5
+    load_stable_slide_vel_tol_mmps: 1.0
+    load_stable_force_window_sec: 1.0
+    load_stable_force_slope_tol_nps: 3.0
+    load_stable_force_fresh_timeout_sec: 0.40
+    load_stable_delta_fresh_timeout_sec: 0.40
+    load_stable_xy_tol_m: 0.012
+    load_stable_z_tol_m: 0.10
+
+    abort_on_any_fault: true
+    loop_hz: 20.0
+
+    # ===== slide continuous compensation =====
+    slide_comp_enable: true
+    # 上架/对位阶段只走 direct position，不走连续速度补偿
+    slide_comp_alignment_enable: false
+    slide_comp_transport_enable: true
+    slide_comp_cmd_period_sec: 0.033
+
+    slide_comp_x_sign: 1.0
+    slide_comp_y_sign: 1.0
+    slide_comp_z_sign: 1.0
+
+    slide_comp_vx_gain_mmps_per_m: 600.0
+    slide_comp_vy_gain_mmps_per_m: 600.0
+    slide_comp_vz_gain_mmps_per_m: 400.0
+
+    slide_comp_vx_limit_mmps: 40.0
+    slide_comp_vy_limit_mmps: 40.0
+    slide_comp_vz_limit_mmps: 20.0
+
+    slide_comp_dx_deadband_m: 0.002
+    slide_comp_dy_deadband_m: 0.002
+    slide_comp_dz_deadband_m: 0.002
+
+    slide_comp_hold_zero_on_lost: true
+    slide_comp_abort_transport_on_hard_lost: false
+
+    # ===== transport 带载随动 =====
+    slide_transport_vx_gain_mmps_per_m: 120.0
+    slide_transport_vy_gain_mmps_per_m: 120.0
+    slide_transport_vz_gain_mmps_per_m: 120.0
+
+    slide_transport_vx_limit_mmps: 10.0
+    slide_transport_vy_limit_mmps: 10.0
+    slide_transport_vz_limit_mmps: 10.0
+
+    slide_transport_dx_deadband_m: 0.004
+    slide_transport_dy_deadband_m: 0.004
+    slide_transport_dz_deadband_m: 0.010
+    slide_transport_dz_hold_tol_m: 0.015
+
+    # ===== P1: transport XY 柔顺死区 / 力让步 =====
+    slide_transport_force_yield_deadband_n: 12.0
+    slide_transport_force_yield_full_n: 30.0
+    slide_transport_force_yield_min_scale: 0.25
+
+    # ===== transport 底盘运动前馈（odom/imu/mocap 融合）=====
+    transport_chassis_fusion_enable: true
+    transport_ff_enable: true
+    transport_ff_use_mocap: true
+    transport_ff_use_odom: true
+    transport_ff_use_imu: true
+    transport_chassis_fresh_timeout_sec: 0.40
+    transport_mocap_twist_alpha: 0.35
+    transport_ff_vx_gain_mmps_per_mps: 220.0
+    transport_ff_vy_gain_mmps_per_mps: 220.0
+    # yaw 前馈先保守一点，避免一开始过补偿
+    transport_ff_yaw_enable: false
+    transport_ff_yaw_gain_scale: 0.25
+    # 没有视觉 delta 时，允许用底盘静止判据通过 stable hold / transport preflight
+    transport_chassis_stable_body_vel_tol_mps: 0.015
+    transport_chassis_stable_yaw_rate_tol_rps: 0.08
+
+    # ===== transport 期间滑台 XY 回中 =====
+    slide_transport_recenter_enable: true
+    slide_transport_recenter_targets_flat: [125.0, 135.0, 126.0, 141.0, 126.0, 134.0]
+    slide_transport_recenter_gain_mmps_per_mm: 0.8
+    slide_transport_recenter_vxy_limit_mmps: 8.0
+    slide_transport_recenter_xy_deadband_mm: 2.0
+
+    # ===== slide realtime loop =====
+    slide_rt_hz: 30.0
+    slide_status_fresh_timeout_sec: 0.6
+    slide_comp_ax_limit_mmps2: 120.0
+    slide_comp_ay_limit_mmps2: 120.0
+    slide_comp_az_limit_mmps2: 60.0
+    slide_comp_vx_min_mmps: 2.0
+    slide_comp_vy_min_mmps: 2.0
+    slide_comp_vz_min_mmps: 1.0
+
+    # ===== direct align fallback =====
+    slide_direct_align_enable: true
+    slide_direct_align_speed_mmps: 20.0
+    slide_direct_align_min_time_sec: 0.10
+    slide_direct_align_settle_margin_sec: 0.25
+    slide_direct_align_fresh_timeout_sec: 1.50
+    slide_direct_align_trigger_wait_sec: 0.80
+    slide_direct_align_max_retry: 3
+    slide_direct_align_pos_deadband_mm: 1.0
+    slide_direct_align_xy_move_confirm_mm: 0.5
+    slide_direct_align_ack_drop_timeout_sec: 0.8
+    slide_direct_align_xy_move_timeout_margin_sec: 3.0
+    slide_direct_align_contact_enable: true
+    slide_post_contact_hold_sec: 5.0
+    slide_direct_align_contact_seek_mm: 140.0
+
+    # ===== alignment strategy (上架/对位阶段强制 direct) =====
+    slide_align_mode: "direct_only"
+    # 按 tracer1~3 顺序配置三轴能力: [x1,y1,z1,x2,y2,z2,x3,y3,z3]
+    slide_axis_enable_flat: [1, 1, 1, 1, 1, 1, 1, 1, 1]
+
+    # ===== slide recenter =====
+    # slide_center_xyz_mm 作为公共 fallback；当上面的按车中心点存在时，XY 优先用按车中心，Z 仍取这里。
+    slide_recenter_enable: true
+    slide_recenter_mode: "physical_xy"
+    slide_center_xyz_mm: [139.0, 138.5, 100.0]
+    slide_recenter_time_sec: 6.0
+    slide_recenter_tol_mm: 1.0
+    slide_recenter_hold_sec: 0.50
+    slide_recenter_abort_on_hard_lost: false
+
+cmd_scheduler:
+  ros__parameters:
+    robots: ["tracer1", "tracer2", "tracer3"]
+    v_max: 0.25
+    w_max: 0.65
+    tick_hz: 30.0
+    base_period_ms: 100.0
+    jitter_ms: 10.0
+    T_min_ms: 25.0
+    T_max_ms: 150.0
+    age_th_ms: 100.0
+    precision_T_max_scale: 0.60
+    precision_age_th_scale: 0.60
+    voi_th: 0.08
+    voi_high_th: 0.25
+    dup_delay_ms: 25.0
+    override_timeout_ms: 150.0
+    enable_eps_trigger: true
+    eps_th: 0.10
+    eps_high_th: 0.25
+    robot_mocap_topics: ["/Rigid17/pose", "/Rigid14/pose", "/Rigid15/pose"]
+    mm_to_m: 0.001
+    swap_xz: false
+    negate_x: false
+    negate_z: true
+    log_dir: "~/.ros/cmd_safety_logs"
+    run_id: ""
+    allow_unsafe_baseline: false
+    baseline_mode: "current_safe_default"
+    scheduler_mode: "current_hybrid"
+    watchdog_mode: "decay_then_stop"
+    baseline_execution_environment: "hardware"
+    link_profile: "unspecified"
+    profile_source: "assumed"
+    communication_profile:
+      mode: "wifi_nominal"
+      profile_source: "configured"
+      delay_ms_mean: 0.0
+      jitter_ms: 0.0
+      loss_rate: 0.0
+      burst_loss_rate: 0.0
+      executor_delay_ms: 0.0
+      notes: "Configured profile for logging and offline/replay experiments; not a claim of measured 5G/Wi-Fi performance."
+
+multi_tracer_return_home:
+  ros__parameters:
+    robot_names: ["tracer1", "tracer2", "tracer3"]
+    robot_mocap_topics: ["/Rigid17/pose", "/Rigid14/pose", "/Rigid15/pose"]
+    home_goal_x_m: [14.54, 14.54, 14.54]
+    home_goal_y_m: [-3.32, -2.32, -1.32]
+    home_goal_yaw_deg: [180.0, 180.0, 180.0]
+    robot_radius_m: 0.9
+    pair_clearance_m: 1.8
+    avoidance_lateral_offset_m: 1.15
+    goal_republish_sec: 1.0
+    decision_hold_sec: 1.0
+    pose_timeout_sec: 0.3
+    distance_tie_tol_m: 0.05
+    planner_hz: 10.0
+    staging_profile_code: 1.0
+    goal_change_tol_m: 0.02
+    swap_xz: false
+    negate_x: false
+    negate_z: true
+    mocap_yaw_mode: "legacy_deg_y"
+    flip_heading_sign: false
+    heading_deg_bias: 0.0

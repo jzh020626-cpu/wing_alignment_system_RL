@@ -1,0 +1,292 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Create a manifest for a controlled ROS2 bench/replay run.
+
+The script does not execute ROS2, tc/netem, or CPU load commands. It records the
+run_id, expected artifacts, and copyable commands/checklists for a bench host.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[1]
+for _PKG_DIR in (_ROOT / "src" / "wing_alignment_system", _ROOT):
+    if (_PKG_DIR / "wing_alignment_system").is_dir() and str(_PKG_DIR) not in sys.path:
+        sys.path.insert(0, str(_PKG_DIR))
+
+from wing_alignment_system.baseline_guard import check_baseline_guard  # noqa: E402
+
+
+PROFILES = {
+    "nominal",
+    "network_delay_only",
+    "executor_backlog_only",
+    "combined_degraded",
+}
+
+BASELINE_MODES = {
+    "current_safe_default",
+    "freshness_aware_transmission_only",
+    "full_method_candidate",
+}
+
+EVIDENCE_CLASSES = {
+    "synthetic_dry_run",
+    "replay",
+    "ros2_bench",
+    "hardware_preliminary",
+}
+
+EVIDENCE_TO_ENVIRONMENT = {
+    "synthetic_dry_run": "synthetic",
+    "replay": "replay",
+    "ros2_bench": "bench",
+    "hardware_preliminary": "hardware",
+}
+
+
+def _split_csv(value: str) -> list[str]:
+    return [part.strip() for part in str(value).split(",") if part.strip()]
+
+
+def _run_id(profile: str, baseline_mode: str, evidence_class: str) -> str:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return f"p1real_{evidence_class}_{profile}_{baseline_mode}_{stamp}"
+
+
+def _profile_parameters(profile: str) -> dict:
+    if profile == "network_delay_only":
+        return {
+            "mode": "emulated_delay_jitter_loss",
+            "delay_ms_mean": 120.0,
+            "jitter_ms": 28.0,
+            "loss_rate": 0.0,
+            "burst_loss_rate": 0.0,
+            "executor_delay_ms": 0.0,
+        }
+    if profile == "executor_backlog_only":
+        return {
+            "mode": "executor_backlog",
+            "delay_ms_mean": 0.0,
+            "jitter_ms": 0.0,
+            "loss_rate": 0.0,
+            "burst_loss_rate": 0.0,
+            "executor_delay_ms": 110.0,
+        }
+    if profile == "combined_degraded":
+        return {
+            "mode": "combined_degraded",
+            "delay_ms_mean": 90.0,
+            "jitter_ms": 35.0,
+            "loss_rate": 0.0,
+            "burst_loss_rate": 0.0,
+            "executor_delay_ms": 85.0,
+        }
+    return {
+        "mode": "wifi_nominal",
+        "delay_ms_mean": 0.0,
+        "jitter_ms": 0.0,
+        "loss_rate": 0.0,
+        "burst_loss_rate": 0.0,
+        "executor_delay_ms": 0.0,
+    }
+
+
+def _bench_commands(profile: str, iface: str, duration_sec: int) -> list[str]:
+    commands: list[str] = []
+    if profile in {"network_delay_only", "combined_degraded"}:
+        params = _profile_parameters(profile)
+        commands.append(
+            "sudo tc qdisc add dev "
+            f"{iface} root netem delay {params['delay_ms_mean']:.0f}ms "
+            f"{params['jitter_ms']:.0f}ms distribution normal"
+        )
+        commands.append(f"sudo tc qdisc del dev {iface} root")
+    if profile in {"executor_backlog_only", "combined_degraded"}:
+        commands.append(
+            "python3 -c \"import time; end=time.time()+"
+            f"{int(duration_sec)}\\nwhile time.time()<end: pass\""
+        )
+    if not commands:
+        commands.append("# nominal: no degradation injection command")
+    return commands
+
+
+def _write_overlay(path: Path, manifest: dict) -> None:
+    profile = manifest["profile_parameters"]
+    lines = [
+        "# Bench overlay generated for manifest tracking.",
+        "# Merge with the full mission_params.yaml before launching if your launch file accepts only one parameter file.",
+        "cmd_scheduler:",
+        "  ros__parameters:",
+        f"    run_id: \"{manifest['run_id']}\"",
+        f"    log_dir: \"{manifest['log_roots']['cmd_safety_log_root']}\"",
+        f"    baseline_mode: \"{manifest['baseline_mode']}\"",
+        f"    baseline_execution_environment: \"{manifest['baseline_execution_environment']}\"",
+        "    communication_profile:",
+        f"      mode: \"{profile['mode']}\"",
+        "      profile_source: \"bench_manifest\"",
+        f"      delay_ms_mean: {profile['delay_ms_mean']}",
+        f"      jitter_ms: {profile['jitter_ms']}",
+        f"      loss_rate: {profile['loss_rate']}",
+        f"      burst_loss_rate: {profile['burst_loss_rate']}",
+        f"      executor_delay_ms: {profile['executor_delay_ms']}",
+        "mission_coordinator:",
+        "  ros__parameters:",
+        f"    run_id: \"{manifest['run_id']}\"",
+        f"    bench_log_dir: \"{manifest['log_roots']['mission_log_root']}\"",
+        f"    mission_log_dir: \"{manifest['log_roots']['mission_log_root']}\"",
+    ]
+    for robot in manifest["robot_ids"]:
+        lines.extend(
+            [
+                f"{robot}:",
+                "  cmd_watchdog:",
+                "    ros__parameters:",
+                f"      run_id: \"{manifest['run_id']}\"",
+                f"      log_dir: \"{manifest['log_roots']['cmd_safety_log_root']}\"",
+                f"      baseline_mode: \"{manifest['baseline_mode']}\"",
+                f"      baseline_execution_environment: \"{manifest['baseline_execution_environment']}\"",
+                "      communication_profile:",
+                f"        mode: \"{profile['mode']}\"",
+                "        profile_source: \"bench_manifest\"",
+                f"        delay_ms_mean: {profile['delay_ms_mean']}",
+                f"        jitter_ms: {profile['jitter_ms']}",
+                f"        loss_rate: {profile['loss_rate']}",
+                f"        burst_loss_rate: {profile['burst_loss_rate']}",
+                f"        executor_delay_ms: {profile['executor_delay_ms']}",
+            ]
+        )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def create_manifest(
+    out_dir: str,
+    profile: str,
+    baseline_mode: str = "current_safe_default",
+    evidence_class: str = "ros2_bench",
+    run_id: str = "",
+    robot_ids: str = "tracer1,tracer2,tracer3",
+    cmd_safety_log_root: str = "",
+    mission_log_root: str = "",
+    netem_iface: str = "lo",
+    duration_sec: int = 60,
+    ros2_available: bool | None = None,
+    tc_available: bool | None = None,
+) -> dict:
+    if profile not in PROFILES:
+        raise ValueError(f"unsupported profile: {profile}")
+    if baseline_mode not in BASELINE_MODES:
+        raise ValueError(f"unsupported baseline_mode: {baseline_mode}")
+    if evidence_class not in EVIDENCE_CLASSES:
+        raise ValueError(f"unsupported evidence_class: {evidence_class}")
+
+    out_path = Path(out_dir).expanduser()
+    out_path.mkdir(parents=True, exist_ok=True)
+    run_id = run_id.strip() or _run_id(profile, baseline_mode, evidence_class)
+    robots = _split_csv(robot_ids) or ["tracer1", "tracer2", "tracer3"]
+    environment = EVIDENCE_TO_ENVIRONMENT[evidence_class]
+    guard = check_baseline_guard(
+        baseline_mode=baseline_mode,
+        scheduler_mode="current_hybrid" if baseline_mode == "current_safe_default" else baseline_mode,
+        watchdog_mode="decay_then_stop",
+        execution_environment=environment,
+    )
+
+    ros2_found = shutil.which("ros2") is not None if ros2_available is None else bool(ros2_available)
+    tc_found = shutil.which("tc") is not None if tc_available is None else bool(tc_available)
+    cmd_root = Path(cmd_safety_log_root).expanduser() if cmd_safety_log_root else out_path / "cmd_safety_logs"
+    mission_root = Path(mission_log_root).expanduser() if mission_log_root else out_path / "mission_bench_logs"
+    cmd_run_dir = cmd_root / run_id
+    mission_run_dir = mission_root / run_id
+    overlay_path = out_path / "bench_params_overlay.yaml"
+
+    manifest = {
+        "run_id": run_id,
+        "profile": profile,
+        "baseline_mode": guard["baseline_mode"],
+        "baseline_candidate_status": guard["baseline_candidate_status"],
+        "baseline_candidate_note": guard["baseline_candidate_note"],
+        "baseline_execution_environment": guard["baseline_execution_environment"],
+        "evidence_class": evidence_class,
+        "robot_ids": robots,
+        "created_by": "scripts/create_bench_run_manifest.py",
+        "disclaimer": "Manifest and commands only; this file does not prove that ROS2 bench commands were executed.",
+        "environment": {
+            "ros2_available": ros2_found,
+            "tc_available": tc_found,
+            "netem_iface": netem_iface,
+        },
+        "profile_parameters": _profile_parameters(profile),
+        "log_roots": {
+            "cmd_safety_log_root": str(cmd_root),
+            "mission_log_root": str(mission_root),
+        },
+        "analysis": {
+            "run_dir": str(cmd_run_dir),
+            "analyzer": "scripts/analyze_effective_freshness.py",
+        },
+        "csv_paths": {
+            "scheduler": [str(cmd_run_dir / "scheduler_audit.csv"), str(cmd_run_dir / "events.csv")],
+            "watchdog": [str(cmd_run_dir / f"ts_{robot}.csv") for robot in robots],
+            "mission": [str(mission_run_dir / "mission_runtime_events.csv")],
+        },
+        "bench_injection_commands": _bench_commands(profile, netem_iface, duration_sec),
+        "ros2_commands": [
+            f"ros2 launch wing_alignment_system run_all.launch.py config_file:={overlay_path}",
+        ],
+        "checklist": [
+            "Confirm this is a bench/replay setup, not unattended hardware docking.",
+            "Confirm emergency stop remains available for any hardware_preliminary run.",
+            "Do not use watchdog_off or stale pass-through for this P1-real run.",
+            "After the run, execute scripts/validate_bench_run_artifacts.py --manifest run_manifest.json.",
+        ],
+    }
+    if not ros2_found:
+        manifest["checklist"].append("ros2 not detected on this machine; copy commands to a ROS2 bench host.")
+    if profile in {"network_delay_only", "combined_degraded"} and not tc_found:
+        manifest["checklist"].append("tc not detected on this machine; run netem commands on a Linux bench host or use a ROS2 delay proxy.")
+    if baseline_mode == "full_method_candidate":
+        manifest["checklist"].append("full_method_candidate is candidate/not-yet-final; do not report it as completed full method.")
+
+    _write_overlay(overlay_path, manifest)
+    (out_path / "run_manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return manifest
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Create a P1-real bench run manifest.")
+    parser.add_argument("--out-dir", required=True)
+    parser.add_argument("--profile", required=True, choices=sorted(PROFILES))
+    parser.add_argument("--baseline-mode", default="current_safe_default", choices=sorted(BASELINE_MODES))
+    parser.add_argument("--evidence-class", default="ros2_bench", choices=sorted(EVIDENCE_CLASSES))
+    parser.add_argument("--run-id", default="")
+    parser.add_argument("--robot-ids", default="tracer1,tracer2,tracer3")
+    parser.add_argument("--cmd-safety-log-root", default="")
+    parser.add_argument("--mission-log-root", default="")
+    parser.add_argument("--netem-iface", default="lo")
+    parser.add_argument("--duration-sec", type=int, default=60)
+    args = parser.parse_args()
+    manifest = create_manifest(
+        out_dir=args.out_dir,
+        profile=args.profile,
+        baseline_mode=args.baseline_mode,
+        evidence_class=args.evidence_class,
+        run_id=args.run_id,
+        robot_ids=args.robot_ids,
+        cmd_safety_log_root=args.cmd_safety_log_root,
+        mission_log_root=args.mission_log_root,
+        netem_iface=args.netem_iface,
+        duration_sec=args.duration_sec,
+    )
+    print(json.dumps({"run_id": manifest["run_id"], "manifest": str(Path(args.out_dir).expanduser() / "run_manifest.json")}, indent=2))
+
+
+if __name__ == "__main__":
+    main()

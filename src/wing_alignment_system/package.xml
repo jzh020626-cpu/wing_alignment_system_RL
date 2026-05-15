@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>wing_alignment_system</name>
+  <version>0.0.0</version>
+  <description>Wing alignment and cooperative transport system for multi-AGV wing support experiments.</description>
+  <maintainer email="ls@todo.todo">ls</maintainer>
+  <license>TODO</license>
+
+  <!-- Runtime dependencies for Python nodes -->
+  <depend>rclpy</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>base_interfaces_demo</depend>
+
+  <!-- Recommended for ros2 launch support -->
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
