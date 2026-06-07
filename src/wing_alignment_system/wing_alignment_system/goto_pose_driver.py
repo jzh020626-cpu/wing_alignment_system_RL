@@ -4,6 +4,7 @@
 import math
 import sys
 import threading
+import time
 import traceback
 from dataclasses import dataclass
 from typing import Optional
@@ -339,6 +340,7 @@ class GotoPoseDriver(Node):
         self._near_rotate_latched = False
         self._precision_relaxed_logged = False
         self._precision_reached_logged = False
+        self._last_control_overrun_log_wall = 0.0
         self._state_lock = threading.RLock()
         self._precision_controller = PrecisionController(self._build_precision_driver_config())
 
@@ -378,6 +380,7 @@ class GotoPoseDriver(Node):
             hz=1.0 / self.dt_nominal,
             tick_fn=self._control_tick,
             on_error=self._on_control_error,
+            on_overrun=self._on_control_overrun,
         )
         self._control_loop.start()
 
@@ -845,6 +848,17 @@ class GotoPoseDriver(Node):
         reason = f'[{self.robot_name}] control loop crashed: {exc}'
         self._publish_fault(reason)
         self.get_logger().error(f'{reason}\n{traceback.format_exc()}')
+
+    def _on_control_overrun(self, loop_name: str, tick_sec: float, overrun_sec: float, count: int):
+        wall = time.time()
+        if wall - self._last_control_overrun_log_wall < 5.0 and int(count) % 100 != 1:
+            return
+        self._last_control_overrun_log_wall = wall
+        self.get_logger().warn(
+            f'[{self.robot_name}] {loop_name} overrun count={int(count)} '
+            f'tick={float(tick_sec) * 1000.0:.2f}ms period={self.dt_nominal * 1000.0:.2f}ms '
+            f'late={float(overrun_sec) * 1000.0:.2f}ms'
+        )
 
     def destroy_node(self):
         if hasattr(self, '_control_loop'):

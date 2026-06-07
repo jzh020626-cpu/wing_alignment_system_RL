@@ -86,6 +86,7 @@ class CmdWatchdog(Node):
         self._last_ctrl_log_kind = None
         self._last_ctrl_log_state = None
         self._last_ctrl_log_ts = 0.0
+        self._last_rt_overrun_log_wall = 0.0
         self.pub_cmd = self.create_publisher(Twist, self.topic_cmd_out, qos_out)
         self.pub_ack = self.create_publisher(UInt32, self.topic_ack, qos_ack)
         self.create_subscription(TwistStamped, self.topic_cmd_stamped, self._cmd_cb, qos_in)
@@ -131,6 +132,7 @@ class CmdWatchdog(Node):
             hz=max(1.0, self.watchdog_hz),
             tick_fn=self._watchdog,
             on_error=self._on_rt_error,
+            on_overrun=self._on_rt_overrun,
         )
         self._rt_loop.start()
 
@@ -382,6 +384,18 @@ class CmdWatchdog(Node):
     def _on_rt_error(self, exc: BaseException):
         self.get_logger().error(
             f'[{self.robot}] watchdog fixed-rate loop crashed: {exc}\n{traceback.format_exc()}'
+        )
+
+    def _on_rt_overrun(self, loop_name: str, tick_sec: float, overrun_sec: float, count: int):
+        wall = time.time()
+        if wall - self._last_rt_overrun_log_wall < 5.0 and int(count) % 100 != 1:
+            return
+        self._last_rt_overrun_log_wall = wall
+        period_ms = 1000.0 / max(1.0, float(self.watchdog_hz))
+        self.get_logger().warn(
+            f'[{self.robot}] {loop_name} overrun count={int(count)} '
+            f'tick={float(tick_sec) * 1000.0:.2f}ms period={period_ms:.2f}ms '
+            f'late={float(overrun_sec) * 1000.0:.2f}ms'
         )
 
     def destroy_node(self):

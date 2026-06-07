@@ -46,6 +46,7 @@ setup(
             'common_rt = wing_alignment_system.common_rt:main',
             'tiaozi = wing_alignment_system.tiaozi:main',
             'mission_phase_client = wing_alignment_system.mission_phase_client:main',
+            'real_machine_preflight = wing_alignment_system.real_machine_preflight:main',
         ],
     },
 )

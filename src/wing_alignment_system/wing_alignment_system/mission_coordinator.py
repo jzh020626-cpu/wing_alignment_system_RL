@@ -666,6 +666,7 @@ class MissionCoordinator(
 
         # ===== slide realtime loop + smoothing =====
         self.declare_parameter('slide_rt_hz', 20.0)
+        self.declare_parameter('slide_rt_apply_inputs', False)
         self.declare_parameter('slide_status_fresh_timeout_sec', 0.5)
         self.declare_parameter('slide_comp_ax_limit_mmps2', 120.0)
         self.declare_parameter('slide_comp_ay_limit_mmps2', 120.0)
@@ -675,6 +676,7 @@ class MissionCoordinator(
         self.declare_parameter('slide_comp_vz_min_mmps', 1.0)
 
         self.slide_rt_hz = max(5.0, float(self.get_parameter('slide_rt_hz').value))
+        self.slide_rt_apply_inputs = bool(self.get_parameter('slide_rt_apply_inputs').value)
         self.slide_status_fresh_timeout_sec = float(self.get_parameter('slide_status_fresh_timeout_sec').value)
         self.slide_comp_ax_limit_mmps2 = float(self.get_parameter('slide_comp_ax_limit_mmps2').value)
         self.slide_comp_ay_limit_mmps2 = float(self.get_parameter('slide_comp_ay_limit_mmps2').value)
@@ -1003,11 +1005,13 @@ class MissionCoordinator(
         )
 
         self.timer = self.create_timer(1.0 / self.loop_hz, self._loop_tick_locked)
+        self._last_slide_rt_overrun_log_wall = 0.0
         self._slide_executor = FixedRateLoop(
             name='mission_slide_rt',
             hz=self.slide_rt_hz,
             tick_fn=self._slide_tick_locked,
             on_error=self._on_slide_rt_error,
+            on_overrun=self._on_slide_rt_overrun,
         )
         self._slide_executor.start()
 
@@ -3365,12 +3369,25 @@ class MissionCoordinator(
 
     def _slide_tick_locked(self):
         with self._state_lock:
-            self._apply_pending_inputs_locked()
+            if self.slide_rt_apply_inputs:
+                self._apply_pending_inputs_locked()
             self.slide_rt_loop()
 
     def _on_slide_rt_error(self, exc: BaseException):
         self.get_logger().error(
             f'[mission_coordinator] slide executor crashed: {exc}\n{traceback.format_exc()}'
+        )
+
+    def _on_slide_rt_overrun(self, loop_name: str, tick_sec: float, overrun_sec: float, count: int):
+        wall = time.time()
+        if wall - self._last_slide_rt_overrun_log_wall < 5.0 and int(count) % 100 != 1:
+            return
+        self._last_slide_rt_overrun_log_wall = wall
+        period_ms = 1000.0 / max(5.0, float(self.slide_rt_hz))
+        self.get_logger().warn(
+            f'[mission_coordinator] {loop_name} overrun count={int(count)} '
+            f'tick={float(tick_sec) * 1000.0:.2f}ms period={period_ms:.2f}ms '
+            f'late={float(overrun_sec) * 1000.0:.2f}ms'
         )
 
     def destroy_node(self):

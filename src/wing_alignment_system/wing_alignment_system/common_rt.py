@@ -16,12 +16,15 @@ class FixedRateLoop:
         hz: float,
         tick_fn: Callable[[], None],
         on_error: Optional[Callable[[BaseException], None]] = None,
+        on_overrun: Optional[Callable[[str, float, float, int], None]] = None,
     ):
         self.name = str(name or 'fixed_rate_loop')
         self.hz = max(1e-3, float(hz))
         self.period_sec = 1.0 / self.hz
         self._tick_fn = tick_fn
         self._on_error = on_error
+        self._on_overrun = on_overrun
+        self._overrun_count = 0
         self._stop_evt = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
@@ -44,6 +47,7 @@ class FixedRateLoop:
     def _run(self):
         next_deadline = time.perf_counter()
         while not self._stop_evt.is_set():
+            tick_start = time.perf_counter()
             try:
                 self._tick_fn()
             except BaseException as exc:  # pragma: no cover - defensive thread boundary
@@ -53,10 +57,18 @@ class FixedRateLoop:
                 break
 
             next_deadline += self.period_sec
-            sleep_sec = next_deadline - time.perf_counter()
+            now = time.perf_counter()
+            tick_sec = now - tick_start
+            sleep_sec = next_deadline - now
             if sleep_sec > 0.0:
                 self._stop_evt.wait(sleep_sec)
             else:
+                self._overrun_count += 1
+                if self._on_overrun is not None:
+                    try:
+                        self._on_overrun(self.name, tick_sec, -sleep_sec, self._overrun_count)
+                    except BaseException:
+                        pass
                 # When we overrun, snap to "now" to avoid unbounded catch-up.
                 next_deadline = time.perf_counter()
 
