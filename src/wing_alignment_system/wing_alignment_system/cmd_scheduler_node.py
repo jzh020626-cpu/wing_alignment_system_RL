@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import os
+import math
 import time
 from typing import Dict
 
@@ -67,6 +68,22 @@ class CmdScheduler(Node):
 
         self.declare_parameter("override_timeout_ms", 150.0)
 
+        self.enable_shadow = bool(self.declare_parameter("enable_policy_shadow", False).value)
+        self.shadow_policy = str(self.declare_parameter("shadow_policy", "delta_hold").value)
+        self.shadow_delta_th = float(self.declare_parameter("shadow_delta_threshold", 0.001).value)
+        self.shadow_max_hold_ms = float(self.declare_parameter("shadow_max_hold_ms", 100.0).value)
+        self.shadow_payload_bytes = int(self.declare_parameter("shadow_payload_bytes", 128).value)
+        self._total_input_count: Dict[str, int] = {}
+        for rn in self.robots:
+            self._total_input_count[rn] = 0
+
+        self.enable_reduced = bool(self.declare_parameter("enable_reduced_output", False).value)
+        self.reduced_policy = str(self.declare_parameter("reduced_policy", "full_update").value)
+        self.reduced_delta_th = float(self.declare_parameter("reduced_delta_threshold", 0.001).value)
+        self.reduced_max_hold_ms = float(self.declare_parameter("reduced_max_hold_ms", 100.0).value)
+        self.reduced_payload_bytes = int(self.declare_parameter("reduced_payload_bytes", 128).value)
+        self.reduced_periodic_k = int(self.declare_parameter("reduced_periodic_k", 2).value)
+
         base_dir = expanduser(str(self.declare_parameter("log_dir", "~/.ros/cmd_safety_logs").value))
         self.log_dir = os.path.join(base_dir, self.run_id)
 
@@ -112,12 +129,104 @@ class CmdScheduler(Node):
             ]
         )
 
+        self._shadow_v_last: Dict[str, float] = {}
+        self._shadow_w_last: Dict[str, float] = {}
+        self._shadow_ts_last: Dict[str, float] = {}
+        self._shadow_tx_count: Dict[str, int] = {}
+        self._shadow_full_count: Dict[str, int] = {}
+        self._shadow_seq: Dict[str, int] = {}
+        for rn in self.robots:
+            self._shadow_v_last[rn] = 0.0
+            self._shadow_w_last[rn] = 0.0
+            self._shadow_ts_last[rn] = -1e9
+            self._shadow_tx_count[rn] = 0
+            self._shadow_full_count[rn] = 0
+            self._shadow_seq[rn] = 0
+
+        if self.enable_shadow:
+            self.shadow_logger = AsyncCsvLogger(
+                os.path.join(self.log_dir, 'shadow_decisions.csv'),
+                [
+                    'run_id', 'robot_id', 'seq',
+                    'timestamp', 'cmd_v', 'cmd_w',
+                    'shadow_policy', 'would_send', 'send_reason',
+                    'command_delta_norm', 'shadow_delta_threshold',
+                    'shadow_max_hold_ms', 'time_since_last_shadow_send_ms',
+                    'shadow_tx_count_so_far', 'full_update_count_so_far',
+                    'shadow_payload_bytes',
+                ]
+            )
+        else:
+            self.shadow_logger = None
+
+        self._reduced_v_last: Dict[str, float] = {}
+        self._reduced_w_last: Dict[str, float] = {}
+        self._reduced_ts_last: Dict[str, float] = {}
+        self._reduced_tx_count: Dict[str, int] = {}
+        self._reduced_full_count: Dict[str, int] = {}
+        self._reduced_suppress_count: Dict[str, int] = {}
+        self._reduced_seq: Dict[str, int] = {}
+        for rn in self.robots:
+            self._reduced_v_last[rn] = 0.0
+            self._reduced_w_last[rn] = 0.0
+            self._reduced_ts_last[rn] = -1e9
+            self._reduced_tx_count[rn] = 0
+            self._reduced_full_count[rn] = 0
+            self._reduced_suppress_count[rn] = 0
+            self._reduced_seq[rn] = 0
+        self._reduced_last_was_zero: Dict[str, bool] = {}
+        for rn in self.robots:
+            self._reduced_last_was_zero[rn] = True
+
+        if self.enable_reduced:
+            self.reduced_logger = AsyncCsvLogger(
+                os.path.join(self.log_dir, 'reduced_decisions.csv'),
+                [
+                    'run_id', 'robot_id', 'seq',
+                    'timestamp', 'cmd_v', 'cmd_w',
+                    'stage', 'full_input_count', 'base_send_count',
+                    'base_suppress_reason',
+                    'enable_reduced_output', 'reduced_policy',
+                    'reduced_would_send', 'actually_published',
+                    'reduced_suppress_reason',
+                    'command_delta_norm',
+                    'time_since_last_reduced_send_ms',
+                    'full_input_count_so_far', 'base_send_count_so_far',
+                    'reduced_tx_count_so_far', 'actual_publish_count_so_far',
+                    'suppressed_count_so_far',
+                    'reduced_delta_threshold', 'reduced_max_hold_ms',
+                    'reduced_payload_bytes',
+                ]
+            )
+        else:
+            self.reduced_logger = None
+
         self.timer = self.create_timer(1.0 / self.tick_hz, self._tick)
 
     def _mk_desired_cb(self, rn: str):
         def cb(msg: Twist):
-            self.policy.on_desired(rn, float(msg.linear.x), float(msg.angular.z))
+            self._total_input_count[rn] = self._total_input_count.get(rn, 0) + 1
+            v = float(msg.linear.x)
+            w = float(msg.angular.z)
+            if self.enable_reduced and self.reduced_policy != "full_update":
+                self._handle_direct_reduced(rn, v, w)
+            else:
+                self.policy.on_desired(rn, v, w)
         return cb
+
+    def _handle_direct_reduced(self, rn, v, w):
+        self._reduced_full_count[rn] += 1
+        suppressed, send_reason = self._reduced_decide(rn, v, w)
+        self._log_reduced_direct(rn, v, w, suppressed, send_reason)
+        if not suppressed:
+            seq = self._reduced_seq.get(rn, 0)
+            self.pub_seq[rn].publish(UInt32(data=int(seq)))
+            cm = TwistStamped()
+            cm.header.stamp = self.get_clock().now().to_msg()
+            cm.header.frame_id = str(seq)
+            cm.twist.linear.x = float(v)
+            cm.twist.angular.z = float(w)
+            self.pub_cmd[rn].publish(cm)
 
     def _mk_ack_cb(self, rn: str):
         def cb(msg: UInt32):
@@ -148,13 +257,21 @@ class CmdScheduler(Node):
 
     def _publish(self, rn: str, seq: int, v: float, w: float, reason: str, age_est: float):
         s = self.policy.st[rn]
-        self.pub_seq[rn].publish(UInt32(data=int(seq)))
-        cm = TwistStamped()
-        cm.header.stamp = self.get_clock().now().to_msg()
-        cm.header.frame_id = str(seq)
-        cm.twist.linear.x = float(v)
-        cm.twist.angular.z = float(w)
-        self.pub_cmd[rn].publish(cm)
+        self._reduced_full_count[rn] += 1  # base scheduler candidate count
+        suppressed = False
+        send_reason = "full_update_disabled"
+        base_reason = reason
+        if self.enable_reduced:
+            suppressed, send_reason = self._reduced_decide(rn, v, w)
+            self._log_reduced(rn, v, w, suppressed, send_reason, base_reason)
+        if not suppressed:
+            self.pub_seq[rn].publish(UInt32(data=int(seq)))
+            cm = TwistStamped()
+            cm.header.stamp = self.get_clock().now().to_msg()
+            cm.header.frame_id = str(seq)
+            cm.twist.linear.x = float(v)
+            cm.twist.angular.z = float(w)
+            self.pub_cmd[rn].publish(cm)
         self.events_logger.log({
             'run_id': self.run_id, 'robot_id': rn, 'task_phase': 'unknown',
             't_tx': f'{now_sec(self):.6f}', 'robot': rn, 'seq': int(seq),
@@ -167,11 +284,175 @@ class CmdScheduler(Node):
             **self._communication_profile_row,
             **self._baseline_guard_row,
         })
+        if self.enable_shadow:
+            self._shadow_log(rn, v, w)
 
     def _tick(self):
+        if self.enable_reduced and self.reduced_policy != "full_update":
+            self.policy.tick(now_sec(self))
+            return
         decisions = self.policy.tick(now_sec(self))
         for rn, dec in decisions:
             self._publish(rn, dec.seq, dec.v, dec.w, dec.reason, dec.age_est)
+
+    def _shadow_log(self, rn: str, v: float, w: float):
+        self._shadow_full_count[rn] += 1
+        now = now_sec(self)
+        delta = abs(v - self._shadow_v_last.get(rn, 0.0)) + 0.5 * abs(w - self._shadow_w_last.get(rn, 0.0))
+        age_ms = (now - self._shadow_ts_last.get(rn, -1e9)) * 1000.0
+        would_send = False
+        send_reason = "no_send"
+        if self._shadow_full_count[rn] == 1:
+            would_send = True
+            send_reason = "first"
+        elif delta > self.shadow_delta_th:
+            would_send = True
+            send_reason = "delta"
+        elif age_ms >= self.shadow_max_hold_ms:
+            would_send = True
+            send_reason = "max_hold"
+        if would_send:
+            self._shadow_tx_count[rn] += 1
+            self._shadow_v_last[rn] = v
+            self._shadow_w_last[rn] = w
+            self._shadow_ts_last[rn] = now
+        self._shadow_seq[rn] += 1
+        self.shadow_logger.log({
+            'run_id': self.run_id,
+            'robot_id': rn,
+            'seq': self._shadow_seq[rn],
+            'timestamp': f'{now:.6f}',
+            'cmd_v': f'{float(v):.6f}',
+            'cmd_w': f'{float(w):.6f}',
+            'shadow_policy': self.shadow_policy,
+            'would_send': int(would_send),
+            'send_reason': send_reason,
+            'command_delta_norm': f'{delta:.6f}',
+            'shadow_delta_threshold': f'{self.shadow_delta_th:.6f}',
+            'shadow_max_hold_ms': self.shadow_max_hold_ms,
+            'time_since_last_shadow_send_ms': f'{age_ms:.3f}',
+            'shadow_tx_count_so_far': self._shadow_tx_count[rn],
+            'full_update_count_so_far': self._shadow_full_count[rn],
+            'shadow_payload_bytes': self.shadow_payload_bytes,
+        })
+
+    def _reduced_decide(self, rn, v, w):
+        fc = self._reduced_full_count[rn]
+        is_zero = abs(float(v)) < 1e-9 and abs(float(w)) < 1e-9
+        is_first = (fc == 1)
+        was_zero = self._reduced_last_was_zero.get(rn, True)
+        if is_first:
+            self._reduced_last_was_zero[rn] = is_zero
+            return False, "first"
+        if is_zero and not was_zero:
+            self._reduced_last_was_zero[rn] = True
+            return False, "zero_transition"
+        if is_zero and was_zero:
+            if self.reduced_policy == "delta_hold":
+                age_ms = (now_sec(self) - self._reduced_ts_last.get(rn, -1e9)) * 1000.0
+                if age_ms >= self.reduced_max_hold_ms:
+                    return False, "max_hold"
+            return True, "suppress"
+        self._reduced_last_was_zero[rn] = False
+        if self.reduced_policy == "full_update":
+            return False, "full_update_disabled"
+        elif self.reduced_policy == "periodic_2":
+            k = max(1, self.reduced_periodic_k)
+            if fc % k == 0:
+                return False, "periodic"
+            else:
+                return True, "suppress"
+        elif self.reduced_policy == "delta_hold":
+            delta = abs(v - self._reduced_v_last.get(rn, 0.0)) + 0.5 * abs(w - self._reduced_w_last.get(rn, 0.0))
+            age_ms = (now_sec(self) - self._reduced_ts_last.get(rn, -1e9)) * 1000.0
+            if delta > self.reduced_delta_th:
+                return False, "delta"
+            if age_ms >= self.reduced_max_hold_ms:
+                return False, "max_hold"
+            return True, "suppress"
+        return False, "full_update_disabled"
+
+    def _log_reduced_direct(self, rn, v, w, suppressed, send_reason):
+        self._reduced_seq[rn] += 1
+        if suppressed:
+            self._reduced_suppress_count[rn] += 1
+        else:
+            self._reduced_tx_count[rn] += 1
+            self._reduced_v_last[rn] = float(v)
+            self._reduced_w_last[rn] = float(w)
+            self._reduced_ts_last[rn] = now_sec(self)
+        now = now_sec(self)
+        delta = abs(v - self._reduced_v_last.get(rn, 0.0)) + 0.5 * abs(w - self._reduced_w_last.get(rn, 0.0))
+        age_ms = (now - self._reduced_ts_last.get(rn, -1e9)) * 1000.0
+        actual_pub = self._reduced_full_count.get(rn, 0) - self._reduced_suppress_count.get(rn, 0)
+        self.reduced_logger.log({
+            'run_id': self.run_id, 'robot_id': rn,
+            'seq': self._reduced_seq[rn],
+            'timestamp': f'{now:.6f}',
+            'cmd_v': f'{float(v):.6f}', 'cmd_w': f'{float(w):.6f}',
+            'stage': 'direct_reduced_input',
+            'direct_reduced_path': 1,
+            'base_scheduler_bypassed': 1,
+            'base_candidate': 0,
+            'base_send': 0,
+            'base_suppress_reason': 'bypassed',
+            'enable_reduced_output': 1,
+            'reduced_policy': self.reduced_policy,
+            'reduced_would_send': 0 if suppressed else 1,
+            'actually_published': 1 if not suppressed else 0,
+            'send_reason': send_reason,
+            'reduced_suppress_reason': send_reason,
+            'command_delta_norm': f'{delta:.6f}',
+            'time_since_last_reduced_send_ms': f'{age_ms:.3f}',
+            'full_input_count_so_far': self._total_input_count.get(rn, 0),
+            'base_send_count_so_far': 0,
+            'reduced_tx_count_so_far': self._reduced_tx_count[rn],
+            'actual_publish_count_so_far': actual_pub,
+            'suppressed_count_so_far': self._reduced_suppress_count[rn],
+            'reduced_delta_threshold': f'{self.reduced_delta_th:.6f}',
+            'reduced_max_hold_ms': self.reduced_max_hold_ms,
+            'reduced_payload_bytes': self.reduced_payload_bytes,
+        })
+
+    def _log_reduced(self, rn, v, w, suppressed, send_reason, base_reason):
+        self._reduced_seq[rn] += 1
+        if suppressed:
+            self._reduced_suppress_count[rn] += 1
+        else:
+            self._reduced_tx_count[rn] += 1
+            self._reduced_v_last[rn] = float(v)
+            self._reduced_w_last[rn] = float(w)
+            self._reduced_ts_last[rn] = now_sec(self)
+        now = now_sec(self)
+        delta = abs(v - self._reduced_v_last.get(rn, 0.0)) + 0.5 * abs(w - self._reduced_w_last.get(rn, 0.0))
+        age_ms = (now - self._reduced_ts_last.get(rn, -1e9)) * 1000.0
+        base_send = self._reduced_full_count.get(rn, 0)
+        actual_pub = base_send - self._reduced_suppress_count.get(rn, 0)
+        self.reduced_logger.log({
+            'run_id': self.run_id, 'robot_id': rn,
+            'seq': self._reduced_seq[rn],
+            'timestamp': f'{now:.6f}',
+            'cmd_v': f'{float(v):.6f}', 'cmd_w': f'{float(w):.6f}',
+            'stage': 'after_tick',
+            'full_input_count': self._total_input_count.get(rn, 0),
+            'base_send_count': base_send,
+            'base_suppress_reason': base_reason,
+            'enable_reduced_output': int(self.enable_reduced),
+            'reduced_policy': self.reduced_policy,
+            'reduced_would_send': 0 if suppressed else 1,
+            'actually_published': 1 if not suppressed else 0,
+            'reduced_suppress_reason': send_reason,
+            'command_delta_norm': f'{delta:.6f}',
+            'time_since_last_reduced_send_ms': f'{age_ms:.3f}',
+            'full_input_count_so_far': self._total_input_count.get(rn, 0),
+            'base_send_count_so_far': base_send,
+            'reduced_tx_count_so_far': self._reduced_tx_count[rn],
+            'actual_publish_count_so_far': actual_pub,
+            'suppressed_count_so_far': self._reduced_suppress_count[rn],
+            'reduced_delta_threshold': f'{self.reduced_delta_th:.6f}',
+            'reduced_max_hold_ms': self.reduced_max_hold_ms,
+            'reduced_payload_bytes': self.reduced_payload_bytes,
+        })
 
 
 def main(args=None):
@@ -183,6 +464,10 @@ def main(args=None):
         pass
     finally:
         node.events_logger.close()
+        if hasattr(node, 'shadow_logger') and node.shadow_logger is not None:
+            node.shadow_logger.close()
+        if hasattr(node, 'reduced_logger') and node.reduced_logger is not None:
+            node.reduced_logger.close()
         node.destroy_node()
         rclpy.shutdown()
 

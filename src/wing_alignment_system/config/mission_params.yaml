@@ -735,6 +735,17 @@ cmd_scheduler:
     enable_eps_trigger: true
     eps_th: 0.10
     eps_high_th: 0.25
+    enable_policy_shadow: false
+    shadow_policy: "delta_hold"
+    shadow_delta_threshold: 0.001
+    shadow_max_hold_ms: 100.0
+    shadow_payload_bytes: 128
+    enable_reduced_output: false
+    reduced_policy: "full_update"
+    reduced_delta_threshold: 0.001
+    reduced_max_hold_ms: 100.0
+    reduced_payload_bytes: 128
+    reduced_periodic_k: 2
     robot_mocap_topics: ["/Rigid17/pose", "/Rigid14/pose", "/Rigid15/pose"]
     mm_to_m: 0.001
     swap_xz: false

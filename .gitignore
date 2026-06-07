@@ -1,0 +1,15 @@
+*
+!.gitignore
+!/src
+!/src/**/*
+!/analysis/
+analysis/*
+!analysis/hardware_experiment/
+analysis/hardware_experiment/*
+!analysis/hardware_experiment/INSTRUMENTATION_PLAN.md
+!analysis/hardware_experiment/HARDWARE_PRELIMINARY_GATE.md
+src/wing_alignment_system/tests
+!src/wing_alignment_system/tests/
+src/wing_alignment_system/tests/*
+!src/wing_alignment_system/tests/test_hardware_preliminary_validation.py
+src/wing_alignment_system/wing_alignment_system/__pycache__

@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import os
+import math
 import time
 import traceback
 
@@ -44,6 +45,7 @@ class CmdWatchdog(Node):
         self.decay_mode = str(self.declare_parameter('decay_mode', 'linear').value).lower().strip()
         self.decay_k = float(self.declare_parameter('decay_k', 3.0).value)
         self.pair_window = float(self.declare_parameter('pair_window_ms', 60.0).value) * 1e-3
+        self.freshness_tau_ms = float(self.declare_parameter('freshness_tau_ms', 1000.0).value)
         self.publish_before_first_cmd = bool(self.declare_parameter('publish_before_first_cmd', False).value)
         self.topic_cmd_stamped = f'/{self.robot}/cmd_vel_stamped'
         self.topic_ack = f'/{self.robot}/last_cmd_seq'
@@ -66,6 +68,7 @@ class CmdWatchdog(Node):
         self._last_cmd_source_ts = 0.0
         self._last_cmd_rx_ts = 0.0
         self._last_cmd_seq = 0
+        self._last_cmd_metadata = self._empty_cmd_metadata()
         self._have_accepted_cmd = False
         self._last_published_state = None
         self.pub_cmd = self.create_publisher(Twist, self.topic_cmd_out, qos_out)
@@ -98,6 +101,16 @@ class CmdWatchdog(Node):
                 *BASELINE_GUARD_CSV_FIELDS,
             ],
         )
+        self.mode_logger = AsyncCsvLogger(
+            os.path.join(self.log_dir, f'mode_timeline_{self.robot}.csv'),
+            [
+                'run_id', 'timestamp', 'robot_id', 'seq',
+                'transmission_mode', 'execution_mode', 'AoI_ms', 'effective_freshness', 'phase',
+                'output_scale', 'stop_reason', 'watchdog_state',
+                'cmd_v_in', 'cmd_w_in', 'cmd_v_out', 'cmd_w_out',
+                't_source', 't_rx', 't_watchdog',
+            ],
+        )
         self._rt_loop = FixedRateLoop(
             name=f'{self.robot}_watchdog_rt',
             hz=max(1.0, self.watchdog_hz),
@@ -122,14 +135,54 @@ class CmdWatchdog(Node):
     def _fmt_ms(value) -> str:
         return f'{float(value) * 1e3:.6f}' if value is not None else ''
 
+    @staticmethod
+    def _empty_cmd_metadata() -> dict:
+        return {
+            'seq_id': 0,
+            'transmission_mode': 'full_update',
+            'execution_mode': 'normal',
+            'aoi_ms': None,
+            'effective_freshness': None,
+            'phase': 'standby',
+        }
+
+    @staticmethod
+    def _decode_cmd_frame_id(frame_id: str) -> dict:
+        raw = str(frame_id or '').strip()
+        if not raw:
+            return CmdWatchdog._empty_cmd_metadata()
+        if raw.isdigit():
+            metadata = CmdWatchdog._empty_cmd_metadata()
+            metadata['seq_id'] = int(raw)
+            return metadata
+        metadata = CmdWatchdog._empty_cmd_metadata()
+        for item in raw.split('|'):
+            if '=' not in item:
+                continue
+            key, value = item.split('=', 1)
+            if key == 'seq':
+                metadata['seq_id'] = int(value or 0)
+            elif key == 'tx':
+                metadata['transmission_mode'] = value or 'full_update'
+            elif key == 'exec':
+                metadata['execution_mode'] = value or 'normal'
+            elif key == 'aoi':
+                metadata['aoi_ms'] = float(value) if value else None
+            elif key == 'eff':
+                metadata['effective_freshness'] = float(value) if value else None
+            elif key == 'phase':
+                metadata['phase'] = value or 'standby'
+        return metadata
+
     def _cmd_cb(self, msg: TwistStamped):
-        try:
-            seq = int(msg.header.frame_id)
-        except ValueError:
+        metadata = self._decode_cmd_frame_id(str(msg.header.frame_id))
+        seq = int(metadata['seq_id'])
+        if seq <= 0:
             self._fallback_rx_seq += 1
             seq = self._fallback_rx_seq
         t_rx = now_sec(self)
         t_source = self._stamp_to_sec(msg.header.stamp)
+        self._last_cmd_metadata = metadata
         self._cmd_rx.put((int(seq), float(msg.twist.linear.x), float(msg.twist.angular.z), t_rx, t_source))
 
     def _stop_cb(self, msg: Bool):
@@ -262,6 +315,34 @@ class CmdWatchdog(Node):
             **self._communication_profile_row,
             **self._baseline_guard_row,
         })
+        aoi_ms = self._last_cmd_metadata.get('aoi_ms')
+        if aoi_ms is None and self._last_cmd_source_ts > 0.0:
+            aoi_ms = max(0.0, (float(now) - self._last_cmd_source_ts) * 1000.0)
+        eff = None
+        if aoi_ms is not None:
+            eff = math.exp(-float(aoi_ms) / max(1.0, self.freshness_tau_ms))
+            eff = max(0.0, min(1.0, eff))
+        self.mode_logger.log({
+            'run_id': self.run_id,
+            'timestamp': f'{now:.6f}',
+            'robot_id': self.robot,
+            'seq': int(self._last_cmd_seq),
+            'transmission_mode': str(self._last_cmd_metadata.get('transmission_mode', 'full_update')),
+            'execution_mode': str(self._last_cmd_metadata.get('execution_mode', 'normal')),
+            'AoI_ms': '' if aoi_ms is None else f'{float(aoi_ms):.3f}',
+            'effective_freshness': '' if eff is None else f'{float(eff):.6f}',
+            'phase': str(self._last_cmd_metadata.get('phase', 'standby')),
+            'output_scale': f'{float(getattr(out, "output_scale", 1.0)):.6f}',
+            'stop_reason': str(getattr(out, "stop_reason", "") or stale_reason),
+            'watchdog_state': out.state,
+            'cmd_v_in': f'{float(self.policy.st.last_v):.6f}',
+            'cmd_w_in': f'{float(self.policy.st.last_w):.6f}',
+            'cmd_v_out': f'{float(out.applied_v):.6f}',
+            'cmd_w_out': f'{float(out.applied_w):.6f}',
+            't_source': self._fmt_sec(self._last_cmd_source_ts),
+            't_rx': self._fmt_sec(self._last_cmd_rx_ts),
+            't_watchdog': f'{now:.6f}',
+        })
 
     def _on_rt_error(self, exc: BaseException):
         self.get_logger().error(
@@ -277,6 +358,8 @@ class CmdWatchdog(Node):
             self.rx_logger.close()
         if hasattr(self, 'ts_logger'):
             self.ts_logger.close()
+        if hasattr(self, 'mode_logger'):
+            self.mode_logger.close()
         return super().destroy_node()
 
 

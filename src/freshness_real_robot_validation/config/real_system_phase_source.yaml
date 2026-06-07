@@ -1,0 +1,16 @@
+source_priority:
+  - native_topic
+  - mission_runtime_tail
+  - geometry_heuristic
+default_phase_source_mode: auto
+default_fallback_policy: allow_priority_fallback
+
+pose_topics:
+  tracer1: /Rigid17/pose
+  tracer2: /Rigid14/pose
+  tracer3: /Rigid15/pose
+
+wing_pose_topic: /Rigid8/pose
+native_phase_topic: ""
+mission_runtime_csv: ""
+poll_period_sec: 0.2

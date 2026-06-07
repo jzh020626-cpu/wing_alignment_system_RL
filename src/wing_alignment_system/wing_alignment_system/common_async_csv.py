@@ -17,7 +17,7 @@ class AsyncCsvLogger:
         self._fieldnames = list(fieldnames)
 
         self._fp = open(path, "w", newline="", encoding="utf-8")
-        self._wr = csv.DictWriter(self._fp, fieldnames=self._fieldnames)
+        self._wr = csv.DictWriter(self._fp, fieldnames=self._fieldnames, extrasaction='ignore')
         self._wr.writeheader()
         self._fp.flush()
 

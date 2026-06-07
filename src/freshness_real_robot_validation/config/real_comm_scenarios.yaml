@@ -1,0 +1,22 @@
+scenarios:
+  real-nominal:
+    wrapper_mode: observe
+    delay_ms_mean: 0.0
+    jitter_ms: 0.0
+    loss_rate: 0.0
+    burst_loss_rate: 0.0
+    duplicate_on_critical: false
+  real-main:
+    wrapper_mode: active
+    delay_ms_mean: 35.0
+    jitter_ms: 6.0
+    loss_rate: 0.02
+    burst_loss_rate: 0.05
+    duplicate_on_critical: false
+  real-boundary-onset:
+    wrapper_mode: active
+    delay_ms_mean: 55.0
+    jitter_ms: 10.0
+    loss_rate: 0.05
+    burst_loss_rate: 0.10
+    duplicate_on_critical: true

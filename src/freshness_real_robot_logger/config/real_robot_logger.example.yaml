@@ -1,0 +1,38 @@
+ros:
+  domain_id: 36
+  node_name: real_robot_network_calibration_logger
+  use_sim_time: false
+
+output:
+  csv_path: artifacts/real_robot/calibration/real_robot_network_calibration_sample.csv
+  summary_json_path: artifacts/real_robot/calibration/real_robot_network_calibration_summary.json
+  flush_every_n_rows: 10
+
+time_sync:
+  assume_synchronized_clocks: false
+  max_reasonable_one_way_delay_ms: 5000
+  record_delay_as_proxy_when_unsynced: true
+
+freshness:
+  default_tau_ms: 1000
+  phase_tau_ms:
+    dispatch: 1000
+    cooperative_transport: 800
+    narrow_passage: 500
+    final_alignment: 300
+    release_exit: 1000
+
+topics:
+  - topic_name: /calib/test_status
+    msg_type: std_msgs/msg/String
+    robot_id: robot_1
+    peer_id: base
+    seq_source: payload_json.seq_id
+    sender_timestamp_source: payload_json.sender_timestamp
+    msg_size_source: serialized
+    phase_source: payload_json.phase
+    task_progress_source: payload_json.task_progress
+    control_mode_source: payload_json.control_mode
+    emergency_stop_source: payload_json.emergency_stop
+    fallback_flag_source: payload_json.fallback_flag
+    done_reason_source: payload_json.done_reason
