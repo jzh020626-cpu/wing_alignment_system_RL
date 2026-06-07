@@ -481,6 +481,9 @@ mission_coordinator:
     reach_min_delay_sec: 0.25
     waypoint_dwell_sec: 2.0
     dwell_lock_stop: true
+    final_precision_enable: true
+    final_precision_robots: ["tracer1", "tracer2", "tracer3"]
+    final_precision_window_m: 0.35
 
     micro_mode: "cross"
     micro_radii_m: [0.0, 0.08, 0.15]

@@ -182,6 +182,9 @@ class MissionCoordinator(
         self.declare_parameter('reach_min_delay_sec', 0.25)
         self.declare_parameter('waypoint_dwell_sec', 2.0)
         self.declare_parameter('dwell_lock_stop', True)
+        self.declare_parameter('final_precision_enable', True)
+        self.declare_parameter('final_precision_robots', ['tracer1', 'tracer2', 'tracer3'])
+        self.declare_parameter('final_precision_window_m', 0.35)
         self.declare_parameter('micro_mode', 'cross')
         self.declare_parameter('micro_radii_m', [0.0, 0.08, 0.15])
         self.declare_parameter('micro_max_attempts', 4)
@@ -220,6 +223,9 @@ class MissionCoordinator(
         self.reach_min_delay_sec = float(self.get_parameter('reach_min_delay_sec').value)
         self.waypoint_dwell_sec = float(self.get_parameter('waypoint_dwell_sec').value)
         self.dwell_lock_stop = bool(self.get_parameter('dwell_lock_stop').value)
+        self.final_precision_enable = bool(self.get_parameter('final_precision_enable').value)
+        self.final_precision_robots = [str(x) for x in self.get_parameter('final_precision_robots').value]
+        self.final_precision_window_m = max(0.05, float(self.get_parameter('final_precision_window_m').value))
         self.micro_list = micro_offsets(
             str(self.get_parameter('micro_mode').value),
             [float(x) for x in self.get_parameter('micro_radii_m').value]

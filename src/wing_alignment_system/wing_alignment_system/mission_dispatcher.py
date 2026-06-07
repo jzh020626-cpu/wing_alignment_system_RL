@@ -9,36 +9,48 @@ from wing_alignment_system.mission_geometry import _now_sec, wrap_angle_rad
 
 
 class MissionDispatcherMixin:
-    def _tracer2_final_precision_window_m(self) -> float:
-        return max(0.35, float(getattr(self, 'raw_qr_accept_radius_m', 0.18)))
+    def _final_precision_enabled_for(self, rn: str) -> bool:
+        if not bool(getattr(self, 'final_precision_enable', True)):
+            return False
+        robots = getattr(self, 'final_precision_robots', ['tracer1', 'tracer2', 'tracer3'])
+        if isinstance(robots, str):
+            items = [item.strip() for item in robots.split(',')]
+        else:
+            items = [str(item).strip() for item in robots]
+        items = [item for item in items if item]
+        return ('all' in items) or (str(rn) in items)
 
-    def _clear_tracer2_final_precision(self, rn: str, disable_precision: bool = False):
+    def _final_precision_window_m(self) -> float:
+        configured = float(getattr(self, 'final_precision_window_m', 0.35))
+        return max(configured, float(getattr(self, 'raw_qr_accept_radius_m', 0.18)))
+
+    def _clear_final_precision(self, rn: str, disable_precision: bool = False):
         ctx = self.rt[rn]
-        setattr(ctx, '_tracer2_final_precision_pending', False)
-        setattr(ctx, '_tracer2_final_precision_active', False)
-        setattr(ctx, '_tracer2_final_precision_window_m', 0.0)
+        setattr(ctx, '_final_precision_pending', False)
+        setattr(ctx, '_final_precision_active', False)
+        setattr(ctx, '_final_precision_window_m', 0.0)
         if disable_precision:
             self.precision_on(rn, False)
 
-    def _update_tracer2_final_precision(self, rn: str):
-        if rn != 'tracer2':
-            return
+    def _clear_tracer2_final_precision(self, rn: str, disable_precision: bool = False):
+        self._clear_final_precision(rn, disable_precision=disable_precision)
 
+    def _update_final_precision(self, rn: str):
         ctx = self.rt[rn]
-        pending = bool(getattr(ctx, '_tracer2_final_precision_pending', False))
-        active = bool(getattr(ctx, '_tracer2_final_precision_active', False))
+        pending = bool(getattr(ctx, '_final_precision_pending', False))
+        active = bool(getattr(ctx, '_final_precision_active', False))
 
         if (
             (not pending)
+            or (not self._final_precision_enabled_for(rn))
             or ctx.goal_kind != 'FINAL'
             or ctx.segs is None
             or ctx.seg_i != (len(ctx.segs) - 1)
-            or len(ctx.segs) < 2
             or ctx.final_target is None
             or rn not in self.robot_xy
         ):
             if pending or active:
-                self._clear_tracer2_final_precision(rn, disable_precision=active)
+                self._clear_final_precision(rn, disable_precision=active)
             return
 
         if active:
@@ -47,17 +59,20 @@ class MissionDispatcherMixin:
         xt, yt = ctx.final_target
         rx, ry = self.robot_xy[rn]
         dist_to_final = math.hypot(float(rx) - float(xt), float(ry) - float(yt))
-        threshold_m = float(getattr(ctx, '_tracer2_final_precision_window_m', 0.0))
+        threshold_m = float(getattr(ctx, '_final_precision_window_m', 0.0))
         if dist_to_final > threshold_m:
             return
 
-        setattr(ctx, '_tracer2_final_precision_active', True)
+        setattr(ctx, '_final_precision_active', True)
         self.precision_on(rn, True)
         self.get_logger().warn(
-            f'[FINAL_TIGHTEN] tracer2 final precision activated '
+            f'[FINAL_TIGHTEN] {rn} final precision activated '
             f'dist_to_final={dist_to_final:.3f} threshold={threshold_m:.3f} '
             f'final=({float(xt):.3f},{float(yt):.3f})'
         )
+
+    def _update_tracer2_final_precision(self, rn: str):
+        self._update_final_precision(rn)
 
     def _normalize_path_mode(self, mode: str, default: str = 'x_first') -> str:
         mode_norm = str(mode or '').lower().strip()
@@ -161,10 +176,9 @@ class MissionDispatcherMixin:
 
         gx, gy = ctx.segs[ctx.seg_i]
         is_last_seg = (ctx.seg_i == len(ctx.segs) - 1)
-        defer_tracer2_final_precision = (
-            rn == 'tracer2'
+        defer_final_precision = (
+            self._final_precision_enabled_for(rn)
             and ctx.goal_kind == 'FINAL'
-            and len(ctx.segs) >= 2
             and is_last_seg
         )
 
@@ -190,20 +204,20 @@ class MissionDispatcherMixin:
         else:
             profile_code = 0.0
 
-        if defer_tracer2_final_precision:
-            threshold_m = self._tracer2_final_precision_window_m()
-            setattr(ctx, '_tracer2_final_precision_pending', True)
-            setattr(ctx, '_tracer2_final_precision_active', False)
-            setattr(ctx, '_tracer2_final_precision_window_m', threshold_m)
+        if defer_final_precision:
+            threshold_m = self._final_precision_window_m()
+            setattr(ctx, '_final_precision_pending', True)
+            setattr(ctx, '_final_precision_active', False)
+            setattr(ctx, '_final_precision_window_m', threshold_m)
             self.precision_on(rn, False)
             self.get_logger().warn(
-                f'[FINAL_TIGHTEN] tracer2 final precision deferred until terminal window | '
+                f'[FINAL_TIGHTEN] {rn} final precision deferred until terminal window | '
                 f'start_dist_to_final={math.hypot(float(gx) - float(px), float(gy) - float(py)):.3f} '
                 f'threshold={threshold_m:.3f} '
                 f'waypoint=({px:.3f},{py:.3f}) final=({gx:.3f},{gy:.3f})'
             )
         else:
-            self._clear_tracer2_final_precision(rn, disable_precision=(rn == 'tracer2'))
+            self._clear_final_precision(rn, disable_precision=True)
 
         self.send_goal(rn, gx, gy, yaw_deg, profile_code=profile_code)
 

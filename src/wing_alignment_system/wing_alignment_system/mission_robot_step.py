@@ -151,7 +151,7 @@ class MissionRobotStepMixin:
             self.precision_on(rn, False)
             return
 
-        self._update_tracer2_final_precision(rn)
+        self._update_final_precision(rn)
 
         if ctx.segs is not None and self.reached_ok(rn):
             if ctx.seg_i + 1 < len(ctx.segs):
