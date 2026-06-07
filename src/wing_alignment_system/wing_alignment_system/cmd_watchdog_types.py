@@ -9,6 +9,7 @@ class WatchdogState:
     t_last_cmd_rx: float = 0.0
     last_v: float = 0.0
     last_w: float = 0.0
+    execution_mode: str = "normal"
     stop_latched: bool = False
     emergency_latched: bool = False
 
@@ -20,6 +21,9 @@ class WatchdogConfig:
     age_stop: float
     decay_mode: str
     decay_k: float
+    enable_execution_mode_output: bool = False
+    degraded_linear_scale: float = 0.5
+    degraded_angular_scale: float = 0.25
 
 
 @dataclass
@@ -29,3 +33,5 @@ class WatchdogOutput:
     state: str
     age: float
     clock_jump_reset: bool = False
+    output_scale: float = 1.0
+    stop_reason: str = ""

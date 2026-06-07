@@ -13,3 +13,11 @@ src/wing_alignment_system/tests
 src/wing_alignment_system/tests/*
 !src/wing_alignment_system/tests/test_hardware_preliminary_validation.py
 src/wing_alignment_system/wing_alignment_system/__pycache__
+
+**/__pycache__/
+**/*.py[cod]
+**/._*
+**/*.bak
+**/*.bak.*
+**/*.backup*
+**/*.bk*

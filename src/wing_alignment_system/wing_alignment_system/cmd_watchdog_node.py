@@ -47,6 +47,9 @@ class CmdWatchdog(Node):
         self.pair_window = float(self.declare_parameter('pair_window_ms', 60.0).value) * 1e-3
         self.freshness_tau_ms = float(self.declare_parameter('freshness_tau_ms', 1000.0).value)
         self.publish_before_first_cmd = bool(self.declare_parameter('publish_before_first_cmd', False).value)
+        self.enable_execution_mode_output = bool(self.declare_parameter('enable_execution_mode_output', False).value)
+        self.degraded_linear_scale = float(self.declare_parameter('degraded_linear_scale', 0.5).value)
+        self.degraded_angular_scale = float(self.declare_parameter('degraded_angular_scale', 0.25).value)
         self.topic_cmd_stamped = f'/{self.robot}/cmd_vel_stamped'
         self.topic_ack = f'/{self.robot}/last_cmd_seq'
         self.topic_cmd_out = f'/{self.robot}/cmd_vel'
@@ -55,7 +58,16 @@ class CmdWatchdog(Node):
         qos_ack = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, history=HistoryPolicy.KEEP_LAST, depth=10)
         qos_emg = QoSProfile(reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL, depth=1)
         qos_volatile = QoSProfile(reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.VOLATILE, depth=5)
-        cfg = WatchdogConfig(watchdog_hz=self.watchdog_hz, age_safe=self.age_safe, age_stop=self.age_stop, decay_mode=self.decay_mode, decay_k=self.decay_k)
+        cfg = WatchdogConfig(
+            watchdog_hz=self.watchdog_hz,
+            age_safe=self.age_safe,
+            age_stop=self.age_stop,
+            decay_mode=self.decay_mode,
+            decay_k=self.decay_k,
+            enable_execution_mode_output=self.enable_execution_mode_output,
+            degraded_linear_scale=self.degraded_linear_scale,
+            degraded_angular_scale=self.degraded_angular_scale,
+        )
         self.policy = WatchdogPolicy(cfg)
         self._cmd_rx = EventQueue(maxsize=4000)
         self._fallback_rx_seq = 0
@@ -71,6 +83,9 @@ class CmdWatchdog(Node):
         self._last_cmd_metadata = self._empty_cmd_metadata()
         self._have_accepted_cmd = False
         self._last_published_state = None
+        self._last_ctrl_log_kind = None
+        self._last_ctrl_log_state = None
+        self._last_ctrl_log_ts = 0.0
         self.pub_cmd = self.create_publisher(Twist, self.topic_cmd_out, qos_out)
         self.pub_ack = self.create_publisher(UInt32, self.topic_ack, qos_ack)
         self.create_subscription(TwistStamped, self.topic_cmd_stamped, self._cmd_cb, qos_in)
@@ -174,6 +189,19 @@ class CmdWatchdog(Node):
                 metadata['phase'] = value or 'standby'
         return metadata
 
+    @staticmethod
+    def _should_log_control_event(self, now: float, kind: str, stop_latched: bool, emergency_latched: bool) -> bool:
+        state = (bool(stop_latched), bool(emergency_latched))
+        last_kind = getattr(self, '_last_ctrl_log_kind', None)
+        last_state = getattr(self, '_last_ctrl_log_state', None)
+        last_ts = float(getattr(self, '_last_ctrl_log_ts', 0.0) or 0.0)
+        if last_kind == kind and last_state == state and float(now) - last_ts < 2.0:
+            return False
+        self._last_ctrl_log_kind = kind
+        self._last_ctrl_log_state = state
+        self._last_ctrl_log_ts = float(now)
+        return True
+
     def _cmd_cb(self, msg: TwistStamped):
         metadata = self._decode_cmd_frame_id(str(msg.header.frame_id))
         seq = int(metadata['seq_id'])
@@ -183,7 +211,7 @@ class CmdWatchdog(Node):
         t_rx = now_sec(self)
         t_source = self._stamp_to_sec(msg.header.stamp)
         self._last_cmd_metadata = metadata
-        self._cmd_rx.put((int(seq), float(msg.twist.linear.x), float(msg.twist.angular.z), t_rx, t_source))
+        self._cmd_rx.put((int(seq), float(msg.twist.linear.x), float(msg.twist.angular.z), t_rx, t_source, metadata))
 
     def _stop_cb(self, msg: Bool):
         if bool(msg.data):
@@ -232,14 +260,21 @@ class CmdWatchdog(Node):
         if emergency_level is not None:
             self.policy.on_emergency(bool(emergency_level))
 
-        for seq, v, w, t_rx, t_source in self._cmd_rx.drain():
-            accepted = self.policy.on_cmd(seq, v, w, t_rx)
+        for seq, v, w, t_rx, t_source, metadata in self._cmd_rx.drain():
+            accepted = self.policy.on_cmd(
+                seq,
+                v,
+                w,
+                t_rx,
+                execution_mode=str(metadata.get('execution_mode', 'normal')),
+            )
             if not accepted:
                 continue
             self._have_accepted_cmd = True
             self._last_cmd_source_ts = float(t_source)
             self._last_cmd_rx_ts = float(t_rx)
             self._last_cmd_seq = int(seq)
+            self._last_cmd_metadata = dict(metadata)
             self.pub_ack.publish(UInt32(data=int(seq)))
             delta_net_proxy = (float(t_rx) - float(t_source)) if float(t_source) > 0.0 else None
             self.rx_logger.log({

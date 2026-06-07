@@ -24,6 +24,7 @@ from wing_alignment_system.mission_geometry import extract_mocap_yaw_rad
 
 GO_HOME = "GO_HOME"
 AVOIDING = "AVOIDING"
+WAIT_ENTRY = "WAIT_ENTRY"
 RESUME_HOME = "RESUME_HOME"
 DONE = "DONE"
 PAUSED_SAFE = "PAUSED_SAFE"
@@ -87,6 +88,8 @@ class PlannerConfig:
     home_profile_code: float = 0.0
     waypoint_reached_tol_m: float = 0.10
     done_reached_tol_m: float = 0.12
+    queue_x_backoff_m: float = 1.0
+    owner_near_home_radius_m: float = 0.0
     priority_order: Tuple[str, ...] = DEFAULT_PRIORITY_ORDER
     home_goals: Dict[str, GoalCommand] = field(default_factory=lambda: build_default_home_goals())
 
@@ -129,6 +132,26 @@ def distance_xy(ax: float, ay: float, bx: float, by: float) -> float:
 
 def distance_to_goal(pose: PoseState, goal: GoalCommand) -> float:
     return distance_xy(pose.x, pose.y, goal.x, goal.y)
+
+
+def startup_gate_update(
+    runtimes: Dict[str, RobotRuntime],
+    now_sec: float,
+    pose_timeout_sec: float,
+    ready_since_sec: Optional[float],
+) -> Optional[float]:
+    for runtime in runtimes.values():
+        if runtime.pose is None:
+            return None
+        if float(now_sec) - float(runtime.pose.stamp_sec) > float(pose_timeout_sec):
+            return None
+    return float(now_sec) if ready_since_sec is None else float(ready_since_sec)
+
+
+def startup_gate_open(ready_since_sec: Optional[float], now_sec: float, hold_sec: float) -> bool:
+    if ready_since_sec is None:
+        return False
+    return float(now_sec) - float(ready_since_sec) >= float(hold_sec)
 
 
 def goal_changed(previous: Optional[GoalCommand], current: Optional[GoalCommand], pos_tol_m: float, yaw_tol_deg: float) -> bool:
@@ -377,6 +400,7 @@ class MultiTracerReturnHomePlanner:
             name: RobotRuntime(name=name, home_goal=self.config.home_goals[name])
             for name in self.config.robot_names
         }
+        self.entry_owner: Optional[str] = None
 
     def update_pose(self, robot_name: str, x: float, y: float, yaw: float, stamp_sec: float) -> None:
         runtime = self.robots[robot_name]
@@ -409,56 +433,61 @@ class MultiTracerReturnHomePlanner:
                     if runtime.mode != RESUME_HOME:
                         runtime.mode = GO_HOME
 
-        assigned_yielders = set()
-        active_names = [name for name in self.config.robot_names if self.robots[name].mode != DONE]
-        for idx, robot_a in enumerate(active_names):
-            for robot_b in active_names[idx + 1:]:
-                runtime_a = self.robots[robot_a]
-                runtime_b = self.robots[robot_b]
-                if runtime_a.pose is None or runtime_b.pose is None or runtime_a.active_goal is None or runtime_b.active_goal is None:
-                    continue
-                if not path_conflict(
-                    (runtime_a.pose.x, runtime_a.pose.y),
-                    (runtime_a.active_goal.x, runtime_a.active_goal.y),
-                    (runtime_b.pose.x, runtime_b.pose.y),
-                    (runtime_b.active_goal.x, runtime_b.active_goal.y),
-                    self.config.pair_clearance_m,
-                ):
-                    continue
+        had_entry_owner = self.entry_owner is not None
+        self._update_entry_owner(require_near_home=not had_entry_owner)
+        if self.entry_owner is not None:
+            self._apply_entry_queue()
+        else:
+            assigned_yielders = set()
+            active_names = [name for name in self.config.robot_names if self.robots[name].mode != DONE]
+            for idx, robot_a in enumerate(active_names):
+                for robot_b in active_names[idx + 1:]:
+                    runtime_a = self.robots[robot_a]
+                    runtime_b = self.robots[robot_b]
+                    if runtime_a.pose is None or runtime_b.pose is None or runtime_a.active_goal is None or runtime_b.active_goal is None:
+                        continue
+                    if not path_conflict(
+                        (runtime_a.pose.x, runtime_a.pose.y),
+                        (runtime_a.active_goal.x, runtime_a.active_goal.y),
+                        (runtime_b.pose.x, runtime_b.pose.y),
+                        (runtime_b.active_goal.x, runtime_b.active_goal.y),
+                        self.config.pair_clearance_m,
+                    ):
+                        continue
 
-                yielder_name = choose_yield_robot(
-                    robot_a,
-                    robot_b,
-                    self.robots,
-                    self.config.distance_tie_tol_m,
-                    self.config.priority_order,
-                )
-                if yielder_name in assigned_yielders:
-                    continue
-                keeper_name = robot_b if yielder_name == robot_a else robot_a
-                yielder = self.robots[yielder_name]
-                keeper = self.robots[keeper_name]
-                if yielder.pose is None or keeper.pose is None or keeper.active_goal is None:
-                    continue
-                if yielder.mode == AVOIDING and yielder.avoidance_goal is not None:
+                    yielder_name = choose_yield_robot(
+                        robot_a,
+                        robot_b,
+                        self.robots,
+                        self.config.distance_tie_tol_m,
+                        self.config.priority_order,
+                    )
+                    if yielder_name in assigned_yielders:
+                        continue
+                    keeper_name = robot_b if yielder_name == robot_a else robot_a
+                    yielder = self.robots[yielder_name]
+                    keeper = self.robots[keeper_name]
+                    if yielder.pose is None or keeper.pose is None or keeper.active_goal is None:
+                        continue
+                    if yielder.mode == AVOIDING and yielder.avoidance_goal is not None:
+                        assigned_yielders.add(yielder_name)
+                        continue
+
+                    yielder_target = (yielder.active_goal.x, yielder.active_goal.y) if yielder.active_goal is not None else (yielder.home_goal.x, yielder.home_goal.y)
+                    keeper_target = (keeper.active_goal.x, keeper.active_goal.y)
+                    yielder.avoidance_goal = select_avoidance_goal(
+                        yielder=yielder,
+                        yielder_target=yielder_target,
+                        keeper=keeper,
+                        keeper_target=keeper_target,
+                        clearance_m=self.config.pair_clearance_m,
+                        lateral_offset_m=self.config.avoidance_lateral_offset_m,
+                        staging_profile_code=self.config.staging_profile_code,
+                    )
+                    yielder.mode = AVOIDING
+                    yielder.active_goal = yielder.avoidance_goal
+                    yielder.avoidance_hold_until_sec = float(now_sec) + float(self.config.decision_hold_sec)
                     assigned_yielders.add(yielder_name)
-                    continue
-
-                yielder_target = (yielder.active_goal.x, yielder.active_goal.y) if yielder.active_goal is not None else (yielder.home_goal.x, yielder.home_goal.y)
-                keeper_target = (keeper.active_goal.x, keeper.active_goal.y)
-                yielder.avoidance_goal = select_avoidance_goal(
-                    yielder=yielder,
-                    yielder_target=yielder_target,
-                    keeper=keeper,
-                    keeper_target=keeper_target,
-                    clearance_m=self.config.pair_clearance_m,
-                    lateral_offset_m=self.config.avoidance_lateral_offset_m,
-                    staging_profile_code=self.config.staging_profile_code,
-                )
-                yielder.mode = AVOIDING
-                yielder.active_goal = yielder.avoidance_goal
-                yielder.avoidance_hold_until_sec = float(now_sec) + float(self.config.decision_hold_sec)
-                assigned_yielders.add(yielder_name)
 
         if all(runtime.mode == DONE for runtime in self.robots.values()):
             self.global_state = DONE
@@ -474,6 +503,46 @@ class MultiTracerReturnHomePlanner:
             runtime.mode = DONE
             runtime.active_goal = runtime.home_goal
             runtime.avoidance_goal = None
+
+    def _update_entry_owner(self, require_near_home: bool) -> None:
+        if float(self.config.owner_near_home_radius_m) <= 0.0:
+            self.entry_owner = None
+            return
+
+        if self.entry_owner is not None:
+            owner = self.robots.get(self.entry_owner)
+            if owner is None or owner.mode == DONE:
+                self.entry_owner = None
+
+        if self.entry_owner is not None:
+            return
+
+        for robot_name in self.config.priority_order:
+            runtime = self.robots.get(robot_name)
+            if runtime is None or runtime.mode == DONE or runtime.pose is None:
+                continue
+            if require_near_home and distance_to_goal(runtime.pose, runtime.home_goal) > float(self.config.owner_near_home_radius_m):
+                continue
+            self.entry_owner = robot_name
+            return
+
+    def _apply_entry_queue(self) -> None:
+        for robot_name in self.config.robot_names:
+            runtime = self.robots[robot_name]
+            if runtime.mode == DONE:
+                continue
+            runtime.avoidance_goal = None
+            if robot_name == self.entry_owner:
+                runtime.mode = GO_HOME
+                runtime.active_goal = runtime.home_goal
+                continue
+            runtime.mode = WAIT_ENTRY
+            runtime.active_goal = GoalCommand(
+                x=float(runtime.home_goal.x) - float(self.config.queue_x_backoff_m),
+                y=float(runtime.home_goal.y),
+                yaw_deg=float(runtime.home_goal.yaw_deg),
+                profile_code=float(self.config.staging_profile_code),
+            )
 
     def _should_pause_for_safety(self, now_sec: float) -> bool:
         for runtime in self.robots.values():
@@ -507,6 +576,8 @@ class MultiTracerReturnHomeNode(Node):
         self.declare_parameter("distance_tie_tol_m", 0.05)
         self.declare_parameter("planner_hz", 10.0)
         self.declare_parameter("staging_profile_code", 1.0)
+        self.declare_parameter("queue_x_backoff_m", 1.0)
+        self.declare_parameter("owner_near_home_radius_m", 0.0)
         self.declare_parameter("goal_change_tol_m", 0.02)
 
         self.swap_xz = bool(self.declare_parameter("swap_xz", False).value)
@@ -533,6 +604,8 @@ class MultiTracerReturnHomeNode(Node):
             pose_timeout_sec=float(self.get_parameter("pose_timeout_sec").value),
             distance_tie_tol_m=float(self.get_parameter("distance_tie_tol_m").value),
             staging_profile_code=float(self.get_parameter("staging_profile_code").value),
+            queue_x_backoff_m=float(self.get_parameter("queue_x_backoff_m").value),
+            owner_near_home_radius_m=float(self.get_parameter("owner_near_home_radius_m").value),
             priority_order=robot_names,
             home_goals=home_goals,
         )
@@ -661,6 +734,7 @@ __all__ = [
     "GO_HOME",
     "PAUSED_SAFE",
     "RESUME_HOME",
+    "WAIT_ENTRY",
     "GoalCommand",
     "PlannerConfig",
     "PoseState",
@@ -672,5 +746,7 @@ __all__ = [
     "map_mocap_point_to_world",
     "path_conflict",
     "select_avoidance_goal",
+    "startup_gate_open",
+    "startup_gate_update",
     "update_robot_mode",
 ]
